@@ -177,9 +177,14 @@ for (const div of SUIVIS) {
   if (!ms || ms.length < 150) { console.log(`   ${div.padEnd(4)} ignoré (${ms ? ms.length : 0} matchs, trop peu)`); continue; }
   const M = ajusterMixte(ms, { demiVie: DEMI_VIE, regul: REGUL });
   modeles[div] = M;
+  const auj = Date.now();
   infos[div] = {
     nom: CHAMPIONNATS[div] || div, matchs: M.n, equipes: M.teams.length,
-    buts: r3(M.c), domicile: r3(M.g), rho: r3(M.rho), dernier: iso(M.ref)
+    buts: r3(M.c), domicile: r3(M.g), rho: r3(M.rho), dernier: iso(M.ref),
+    // un championnat couvert par l'API a des resultats du jour ; les autres
+    // dependent des CSV, publies deux fois par semaine seulement
+    api: Object.values(API_DIV).includes(div),
+    retardJours: Math.max(0, Math.round((auj - M.ref) / 864e5))
   };
   forces[div] = {
     nom: CHAMPIONNATS[div] || div,
@@ -408,6 +413,28 @@ console.log(`   ${Object.keys(pron.attente).length} pronostics en attente de res
 
 /* ─────────── 5. écriture ─────────── */
 if (!existsSync(DOSSIER)) mkdirSync(DOSSIER, { recursive: true });
+/* Âge des cotes. fixtures.csv ne porte aucun horodatage, et il liste encore des
+   rencontres déjà jouées : ses cotes ont donc au moins un jour. On mesure l'âge
+   réel en comparant à la construction précédente : tant que les cotes d'un match
+   ne bougent pas, on conserve la date à laquelle on les a vues pour la première fois. */
+const cheminJourPrec = join(DOSSIER, "jour.json");
+let precedent = null;
+if (existsSync(cheminJourPrec)) { try { precedent = JSON.parse(readFileSync(cheminJourPrec, "utf8")); } catch { } }
+const cotesPrec = new Map();
+for (const m of (precedent && precedent.matchs) || [])
+  cotesPrec.set(`${m.div}|${m.h}|${m.a}`, { cH: m.cH, cD: m.cD, cA: m.cA, vues: m.cotesVues });
+const maintenantISO = new Date().toISOString().slice(0, 16) + "Z";
+for (const m of matchs) {
+  const p = cotesPrec.get(`${m.div}|${m.h}|${m.a}`);
+  const identiques = p && p.cH === m.cH && p.cD === m.cD && p.cA === m.cA;
+  m.cotesVues = identiques && p.vues ? p.vues : maintenantISO;
+}
+const ages = matchs.map(m => (Date.now() - Date.parse(m.cotesVues)) / 36e5).filter(x => isFinite(x));
+if (ages.length) {
+  const moy = ages.reduce((a, b) => a + b, 0) / ages.length;
+  console.log(`   age moyen des cotes : ${moy.toFixed(1)} h (max ${Math.max(...ages).toFixed(1)} h)`);
+}
+
 // classement des écarts les plus favorables, seuil atteint ou non
 const classement = matchs
   .filter(m => m.fiable && m.meilleur)

@@ -10,9 +10,9 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v17";        // à garder aligné avec VERSION dans sw.js
+const VERSION_APP = "v18";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false };
-let E = { set: { ...DEFAUT }, journal: [] };
+let E = { set: { ...DEFAUT }, journal: [], marges: [] };
 let JOUR = null, HISTO = null, SCORES = null;
 let vue = "matchs", filtreJour = "tous", recherche = "";
 let combine = [], tailleCombine = 4;
@@ -22,7 +22,12 @@ let FORCES = null;
 function charger() {
   try {
     const r = localStorage.getItem(CLE);
-    if (r) { const o = JSON.parse(r); E.set = { ...DEFAUT, ...(o.set || {}) }; E.journal = o.journal || []; }
+    if (r) {
+      const o = JSON.parse(r);
+      E.set = { ...DEFAUT, ...(o.set || {}) };
+      E.journal = o.journal || [];
+      E.marges = o.marges || [];
+    }
   } catch { }
 }
 function sauver() { try { localStorage.setItem(CLE, JSON.stringify(E)); } catch { } }
@@ -320,6 +325,18 @@ function brancherComparateur(m) {
   if (!m.cons || !$("#cmp0")) return;
   const nom = $("#cmp-nom");
   nom.addEventListener("change", () => { E.set.operateur = nom.value.trim(); sauver(); });
+  let minuteurMarge = null;
+  /* On enregistre la marge constatée, une entrée par opérateur et par match, après
+     une courte pause : sinon chaque frappe au clavier créerait une ligne. */
+  const memoriser = (nom, marge) => {
+    if (!nom || !isFinite(marge) || marge < 0 || marge > 1) return;
+    const cle = `${nom.toLowerCase()}|${m.div}|${m.h}|${m.a}`;
+    E.marges = (E.marges || []).filter(x => x.cle !== cle);
+    E.marges.push({ cle, nom: nom.trim(), marge, d: aujourdhui(), div: m.div });
+    if (E.marges.length > 300) E.marges = E.marges.slice(-300);
+    sauver();
+  };
+
   const calcule = () => {
     const o = [0, 1, 2].map(i => +$("#cmp" + i).value);
     const boite = $("#cmp-out");
@@ -345,6 +362,9 @@ function brancherComparateur(m) {
       `Sur 100 ${E.set.cur} misés chez cet opérateur, il t'en coûte environ ${coutPour100} en moyenne, avant même de pronostiquer.`,
       `Marge très élevée : sur 100 ${E.set.cur} misés, il t'en coûte environ ${coutPour100} en moyenne. À ce niveau, aucun pronostic ne rattrape le prix payé.`
     ][bande];
+    clearTimeout(minuteurMarge);
+    minuteurMarge = setTimeout(() => memoriser(nom.value, margeOp), 1500);
+
     boite.innerHTML = `
       <div class="fiche">
         <div class="ft"><span class="fn">${esc(nom.value.trim() || "Ton opérateur")}</span>
@@ -419,7 +439,8 @@ function ouvrirMatch(i) {
     </div>
     <h2>Prix et estimations</h2>
     <p style="font-size:12px;color:var(--tx2);margin:0 0 8px">« Marché » = consensus des bookmakers, marge retirée.
-      C'est la meilleure estimation disponible ; l'écart se mesure par rapport à elle.</p>
+      C'est la meilleure estimation disponible ; l'écart se mesure par rapport à elle.
+      ${m.cotesVues ? `<br><span style="color:var(--tx3)">Cotes relevées ${ageCotes(m.cotesVues)} — vérifie le prix réel chez ton opérateur avant de miser.</span>` : ""}</p>
     ${lignes.map(([lab, pm, pmod, c]) => {
       if (!c) return `<div class="lg"><span>${esc(lab)}</span><b class="mut">prix indisponible</b></div>`;
       const e = pm ? margeDe(pm, c) : null;
@@ -922,6 +943,65 @@ function blocFiabilite(source) {
     </p>`;
 }
 
+/** Ce que chaque opérateur prélève, mesuré sur les comparaisons déjà faites. */
+function syntheseOperateurs() {
+  const par = {};
+  for (const x of E.marges || []) {
+    const k = x.nom.toLowerCase();
+    (par[k] ||= { nom: x.nom, marges: [] }).marges.push(x.marge);
+  }
+  return Object.values(par)
+    .map(o => ({
+      nom: o.nom, n: o.marges.length,
+      moy: o.marges.reduce((a, b) => a + b, 0) / o.marges.length
+    }))
+    .sort((a, b) => a.moy - b.moy);
+}
+function rendreOperateurs() {
+  const boite = $("#r-operateurs");
+  if (!boite) return;
+  const ops = syntheseOperateurs();
+  if (!ops.length) {
+    boite.innerHTML = `<p class="mut" style="font-size:12.5px;margin:0">Aucune mesure pour l'instant.
+      Ouvre un match, descends jusqu'à « Comparer avec ton opérateur », saisis ses trois cotes :
+      la marge constatée sera mémorisée ici.</p>`;
+    return;
+  }
+  const b = bilanJournal();
+  boite.innerHTML = ops.map((o, i) => {
+    const cout = b.mises > 0 ? b.mises * (1 - 1 / (1 + o.moy)) : null;
+    const etq = o.moy <= 0.07 ? ["t-pos", "correct"] : o.moy <= 0.12 ? ["t-warn", "cher"] : ["t-neg", "très cher"];
+    return `<div class="lg">
+      <span><b>${esc(o.nom)}</b> <span class="tag ${etq[0]}">${etq[1]}</span>
+        <br><span style="font-size:11.5px;color:var(--tx3)">${o.n} match${o.n > 1 ? "s" : ""} mesuré${o.n > 1 ? "s" : ""}
+        ${i === 0 && ops.length > 1 ? "· le moins cher" : ""}</span></span>
+      <span style="text-align:right"><b>${(100 * o.moy).toFixed(1)} %</b>
+        ${cout != null ? `<br><span style="font-size:11px;color:var(--tx3)">${arg(cout)} sur tes mises</span>` : ""}</span>
+    </div>`;
+  }).join("")
+    + (ops.length > 1 ? `<p style="font-size:12px;color:var(--tx2);margin:10px 0 0">
+        Écart entre le moins cher et le plus cher : <b>${((ops[ops.length - 1].moy - ops[0].moy) * 100).toFixed(1)} points</b>.
+        Sur 100 000 ${E.set.cur} misés dans l'année, cela représente environ
+        ${arg(100000 * (1 / (1 + ops[0].moy) - 1 / (1 + ops[ops.length - 1].moy)))} de différence,
+        sans changer un seul pronostic.</p>` : "")
+    + `<button class="btn gh pt" style="margin-top:11px" id="r-adopter">Utiliser ${(100 * ops[0].moy).toFixed(1)} % dans les calculs</button>`;
+  const bt = $("#r-adopter");
+  if (bt) bt.onclick = () => {
+    E.set.margeOp = Math.round(1000 * ops[0].moy) / 10;
+    sauver(); rendreReglages(); rendreJournal();
+  };
+}
+
+/** Âge des cotes, en clair. Une cote de la veille a pu bouger sensiblement. */
+function ageCotes(quand) {
+  const h = (Date.now() - Date.parse(quand)) / 36e5;
+  if (!isFinite(h)) return "";
+  if (h < 2) return "à l'instant";
+  if (h < 24) return `il y a ${Math.round(h)} h`;
+  const j = Math.round(h / 24);
+  return `il y a ${j} jour${j > 1 ? "s" : ""}`;
+}
+
 /** Nom lisible d'une issue 1 / N / 2 pour une ligne d'historique. */
 function nomIssue(m, code) {
   return code === "1" ? m.h : code === "2" ? m.a : "Match nul";
@@ -1066,7 +1146,9 @@ function rendreJournal() {
   // Ce que la marge explique, et ce qui releve de la chance : la seule decomposition
   // qui dise ou part reellement l'argent.
   if (b.mises > 0) {
-    const marge = Math.max(0, E.set.margeOp / 100);
+    const ops = syntheseOperateurs();
+    const mesuree = ops.length ? ops[0].moy : null;
+    const marge = mesuree != null ? mesuree : Math.max(0, E.set.margeOp / 100);
     const coutMarge = b.mises * (1 - 1 / (1 + marge));
     const chance = b.gain + coutMarge;
     $("#j-stats").insertAdjacentHTML("afterend", `
@@ -1074,7 +1156,8 @@ function rendreJournal() {
         <h2 style="margin-top:0">D'où vient ton résultat</h2>
         <div class="lg"><span>Total misé</span><b>${arg(b.mises)}</b></div>
         <div class="lg"><span>Coût de la marge de ton opérateur<br>
-          <span style="font-size:11.5px;color:var(--tx3)">${E.set.margeOp} % par pari, réglable</span></span>
+          <span style="font-size:11.5px;color:var(--tx3)">${(100 * marge).toFixed(1)} % par pari
+            ${mesuree != null ? `· mesurée sur ${ops[0].n} match${ops[0].n > 1 ? "s" : ""} chez ${esc(ops[0].nom)}` : "· réglage manuel"}</span></span>
           <b class="neg">−${arg(coutMarge)}</b></div>
         <div class="lg"><span>Part de la chance<br>
           <span style="font-size:11.5px;color:var(--tx3)">écart entre ton résultat et cette attente</span></span>
@@ -1254,8 +1337,15 @@ function rendreReglages() {
   CHAMPS_R.forEach(([id, k]) => $("#" + id).value = E.set[k]);
   const dispo = JOUR ? Object.entries(JOUR.championnats) : [];
   $("#r-champs").innerHTML = dispo.map(([code, o]) =>
-    `<button class="puce ${E.set.champs.includes(code) ? "on" : ""}" data-c="${code}">${esc(o.nom)}</button>`).join("")
+    `<button class="puce ${E.set.champs.includes(code) ? "on" : ""}" data-c="${code}"
+       title="${o.api ? "résultats du jour" : "résultats en retard de " + o.retardJours + " jours"}">
+       ${esc(o.nom)}${o.api ? "" : ` <span style="opacity:.65">· ${o.retardJours} j</span>`}</button>`).join("")
     || `<span class="mut" style="font-size:13px">Championnats non chargés.</span>`;
+  const enRetard = dispo.filter(([, o]) => !o.api && o.retardJours >= 3).length;
+  if (enRetard) $("#r-champs").insertAdjacentHTML("afterend",
+    `<p class="mut" style="font-size:12px;margin:10px 0 0">${enRetard} championnats dépendent de fichiers
+     publiés deux fois par semaine : leurs résultats arrivent avec plusieurs jours de retard, et les
+     pronostics y reposent sur des données moins fraîches. Les autres sont mis à jour dans la journée.</p>`);
   $("#r-champs").querySelectorAll("button").forEach(b => b.onclick = () => {
     const c = b.dataset.c;
     E.set.champs = E.set.champs.includes(c) ? E.set.champs.filter(x => x !== c) : [...E.set.champs, c];
@@ -1266,6 +1356,7 @@ function rendreReglages() {
   $("#r-dc").querySelectorAll("button").forEach(b => b.onclick = () => {
     E.set.avecDC = b.dataset.dc === "true"; sauver(); rendreReglages();
   });
+  rendreOperateurs();
   $("#r-infos").innerHTML = JOUR ? `
     ${Object.keys(JOUR.championnats).length} championnats · ${JOUR.matchs.length} rencontres à venir<br>
     Dernière construction : ${new Date(JOUR.genere).toLocaleString("fr-FR")}<br>
