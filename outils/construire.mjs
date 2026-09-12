@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   lireResultats, lireFixtures, ajuster, lambdas, grille, marches,
-  sansMarge, marge, apparier, CHAMPIONNATS
+  sansMarge, marge, apparier, CHAMPIONNATS, NOMS_BOOKS
 } from "./modele.mjs";
 
 const RACINE = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -160,6 +160,7 @@ for (const f of fixtures) {
     lH: r2(L[0]), lA: r2(L[1]), score: mk.scores[0] ? mk.scores[0][0] : null,
     cH: r2(f.maxH), cD: r2(f.maxD), cA: r2(f.maxA), cO: r2(f.maxO), cU: r2(f.maxU), nbBooks: f.nb1x2,
     cons, consOU, fiable: poidsMin >= MIN_MATCHS_FIABLE, poids: r2(poidsMin),
+    parBook: f.parBook.map(c => c.map(x => r2(x))),
     signaux, meilleur
   });
 }
@@ -239,6 +240,7 @@ const classement = matchs
 const jour = {
   genere: new Date().toISOString(),
   seuil: SEUIL_SIGNAL, demiVie: DEMI_VIE, regul: REGUL, probaMin: PROBA_MIN_G,
+  books: NOMS_BOOKS, ecartMediane: 1.08,
   championnats: infos,
   classement,
   matchs

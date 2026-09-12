@@ -1,8 +1,14 @@
 /* Service worker : rend l'application utilisable hors connexion.
-   - coquille de l'application (html/css/js/icônes) : cache d'abord, actualisé en arrière-plan
-   - données du jour (json) : réseau d'abord, repli sur le cache si hors ligne          */
 
-const VERSION = "v1";
+   Stratégie unique — RÉSEAU D'ABORD, cache en repli.
+
+   La coquille était initialement servie « cache d'abord ». C'est plus rapide, mais toute
+   correction n'arrivait qu'au chargement suivant : on pouvait lire du code de la veille sans
+   le savoir. L'application pèse une soixantaine de kilo-octets : la fraîcheur vaut mieux que
+   les quelques dizaines de millisecondes gagnées. Hors connexion, le cache prend le relais et
+   tout reste utilisable.                                                                     */
+
+const VERSION = "v3";
 const COQUILLE = "coquille-" + VERSION;
 const DONNEES = "donnees-" + VERSION;
 
@@ -34,23 +40,13 @@ self.addEventListener("fetch", e => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // données : on privilégie la fraîcheur, le cache ne sert que de filet hors ligne
-  if (url.pathname.includes("/donnees/")) {
-    e.respondWith(
-      fetch(req)
-        .then(r => { const c = r.clone(); caches.open(DONNEES).then(x => x.put(req, c)); return r; })
-        .catch(() => caches.match(req))
-    );
-    return;
-  }
-
-  // coquille : réponse immédiate depuis le cache, mise à jour silencieuse ensuite
+  const cible = url.pathname.includes("/donnees/") ? DONNEES : COQUILLE;
   e.respondWith(
-    caches.match(req).then(hit => {
-      const reseau = fetch(req)
-        .then(r => { if (r && r.ok) { const c = r.clone(); caches.open(COQUILLE).then(x => x.put(req, c)); } return r; })
-        .catch(() => hit);
-      return hit || reseau;
-    })
+    fetch(req)
+      .then(r => {
+        if (r && r.ok) { const c = r.clone(); caches.open(cible).then(x => x.put(req, c)); }
+        return r;
+      })
+      .catch(() => caches.match(req).then(hit => hit || caches.match("./index.html")))
   );
 });

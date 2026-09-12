@@ -13,7 +13,8 @@ const CLE = "pronos-mobile.v1";
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [] };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null;
-let vue = "matchs", filtreJour = "tous";
+let vue = "matchs", filtreJour = "tous", recherche = "";
+let FORCES = null;
 
 /* ─────────── stockage ─────────── */
 function charger() {
@@ -45,14 +46,19 @@ function mise(p, cote) {
   return Math.min(k * E.set.kf, E.set.maxStake / 100) * E.set.bank;
 }
 const margeDe = (p, cote) => p * cote - 1;
+/** Comparaison souple : sans accents, sans casse, sans ponctuation.
+    « munchen », « München » et « MUNCHEN » doivent tomber au même endroit. */
+const norm = x => String(x || "").toLowerCase().normalize("NFD")
+  .replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 
 /* ─────────── chargement des données ─────────── */
 async function recuperer(reseauDabord) {
   const opt = reseauDabord ? { cache: "reload" } : {};
   const lire = async f => { try { const r = await fetch("donnees/" + f, opt); return r.ok ? await r.json() : null; } catch { return null; } };
-  const [j, h] = await Promise.all([lire("jour.json"), lire("historique.json")]);
+  const [j, h, f] = await Promise.all([lire("jour.json"), lire("historique.json"), lire("forces.json")]);
   if (j) JOUR = j;
   if (h) HISTO = h;
+  if (f) FORCES = f;
   majEntete(); rendre();
 }
 function majEntete() {
@@ -87,6 +93,7 @@ function aller(v) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.id === "v-" + v));
   $("#filtres").style.display = v === "matchs" ? "" : "none";
+  $("#recherche-box").style.display = v === "matchs" ? "" : "none";
   window.scrollTo(0, 0);
   rendre();
 }
@@ -96,8 +103,50 @@ function matchsVisibles() {
   if (!JOUR) return [];
   let ms = JOUR.matchs.filter(m => m.d >= aujourdhui());
   if (E.set.champs.length) ms = ms.filter(m => E.set.champs.includes(m.div));
+  const q = requete();
+  if (q) {
+    // une recherche porte sur toutes les journées : chercher une équipe et devoir
+    // en plus deviner le bon jour n'aurait aucun sens
+    const mots = q.split(" ").filter(Boolean);
+    return ms.filter(m => {
+      const champ = norm(m.h + " " + m.a + " " + m.nom);
+      return mots.every(w => champ.includes(w));
+    });
+  }
   if (filtreJour !== "tous") ms = ms.filter(m => m.d === filtreJour);
   return ms;
+}
+
+/* Abréviations que tout le monde tape, mais qui n'apparaissent pas dans les noms officiels. */
+const ABREVIATIONS = {
+  psg: "paris sg", om: "marseille", ol: "lyon", asse: "st etienne", losc: "lille",
+  ogcn: "nice", asm: "monaco", rcl: "lens", fcn: "nantes", srfc: "rennes",
+  mu: "man united", manu: "man united", mufc: "man united", mcfc: "man city",
+  lfc: "liverpool", cfc: "chelsea", afc: "arsenal", thfc: "tottenham", spurs: "tottenham",
+  barca: "barcelona", fcb: "barcelona", atleti: "ath madrid", bayern: "bayern munich",
+  bvb: "dortmund", juve: "juventus", milan: "milan", inter: "inter"
+};
+/** Recherche saisie, une fois les abréviations développées. */
+function requete() {
+  const q = norm(recherche);
+  return ABREVIATIONS[q] || q;
+}
+
+/** Équipes du référentiel dont le nom correspond à la recherche, avec leur rang.
+    Une équipe promue figure dans deux championnats : on ne garde que celui où elle
+    a le plus de matchs pondérés, c'est-à-dire le plus récent. */
+function equipesTrouvees() {
+  const q = requete();
+  if (!FORCES || q.length < 3) return [];
+  const mots = q.split(" ").filter(Boolean), trouve = new Map();
+  for (const [div, o] of Object.entries(FORCES))
+    o.equipes.forEach((e, i) => {
+      if (!mots.every(w => norm(e.nom).includes(w))) return;
+      const ancien = trouve.get(e.nom);
+      if (!ancien || e.poids > ancien.poids)
+        trouve.set(e.nom, { ...e, div, champ: o.nom, rang: i + 1, total: o.equipes.length });
+    });
+  return [...trouve.values()].sort((a, b) => b.poids - a.poids).slice(0, 3);
 }
 function signauxVisibles() {
   const s = E.set.seuil / 100, out = [];
@@ -109,6 +158,8 @@ function signauxVisibles() {
 }
 function rendreFiltres() {
   if (!JOUR) return;
+  if (recherche) { $("#filtres").style.display = "none"; return; }
+  $("#filtres").style.display = vue === "matchs" ? "" : "none";
   const jours = [...new Set(JOUR.matchs.filter(m => m.d >= aujourdhui()).map(m => m.d))].sort();
   $("#filtres").innerHTML =
     `<button class="puce ${filtreJour === "tous" ? "on" : ""}" data-j="tous">Tous</button>` +
@@ -120,10 +171,19 @@ function rendreFiltres() {
 function rendreMatchs() {
   if (!JOUR) { $("#liste-matchs").innerHTML = `<div class="vide">Données non chargées.<br>Vérifie ta connexion puis rafraîchis.</div>`; return; }
   const ms = matchsVisibles();
-  if (!ms.length) { $("#liste-matchs").innerHTML = `<div class="vide">Aucun match à venir pour ce filtre.<br><span style="font-size:12px">Les rencontres paraissent quelques jours à l'avance.</span></div>`; return; }
+  if (!ms.length) {
+    $("#liste-matchs").innerHTML = (recherche ? enteteRecherche(ms) : "") + (recherche
+      ? `<div class="vide">Aucune rencontre à venir pour « ${esc(recherche)} ».<br>
+         <span style="font-size:12px">Les matchs paraissent 3 à 4 jours à l'avance : une équipe qui ne joue
+         pas cette semaine n'apparaît pas ici.</span></div>`
+      : `<div class="vide">Aucun match à venir pour ce filtre.<br>
+         <span style="font-size:12px">Les rencontres paraissent quelques jours à l'avance.</span></div>`);
+    return;
+  }
   const s = E.set.seuil / 100;
-  let html = `<div class="note info" style="margin-bottom:12px">Sous chaque cote : la probabilité estimée par le modèle.
-    Touche un match pour le détail et la comparaison avec le marché.</div>`;
+  let html = recherche ? enteteRecherche(ms)
+    : `<div class="note info" style="margin-bottom:12px">Sous chaque cote : la probabilité estimée par le modèle.
+       Touche un match pour le détail et la comparaison avec le marché.</div>`;
   let jourCourant = "";
   ms.forEach(m => {
     if (m.d !== jourCourant) { jourCourant = m.d; html += `<h2>${libJour(m.d)}</h2>`; }
@@ -141,6 +201,79 @@ function rendreMatchs() {
   });
   $("#liste-matchs").innerHTML = html;
   $("#liste-matchs").querySelectorAll(".match").forEach(c => c.onclick = () => ouvrirMatch(+c.dataset.i));
+}
+
+/** Meilleur bookmaker par issue, et prix jugés non crédibles.
+    Retourne { best:[i,i,i], suspect:[[bool]] } */
+function analyseBooks(m) {
+  const best = [null, null, null], suspect = [];
+  if (!m.parBook) return { best, suspect };
+  for (let k = 0; k < 3; k++) {
+    const vals = m.parBook.map(c => c[k]).filter(x => x);
+    if (!vals.length) continue;
+    const t = vals.slice().sort((a, b) => a - b);
+    const med = t.length % 2 ? t[(t.length - 1) / 2] : (t[t.length / 2 - 1] + t[t.length / 2]) / 2;
+    const plafond = (JOUR.ecartMediane || 1.08) * med;
+    let bi = null, bv = 0;
+    m.parBook.forEach((c, i) => {
+      (suspect[i] = suspect[i] || [])[k] = !!c[k] && c[k] > plafond;
+      if (c[k] && c[k] <= plafond && c[k] > bv) { bv = c[k]; bi = i; }
+    });
+    best[k] = bi;
+  }
+  return { best, suspect };
+}
+function tableauBooks(m) {
+  if (!m.parBook || !JOUR.books) return "";
+  const { best, suspect } = analyseBooks(m);
+  const lignes = JOUR.books.map((nom, i) => {
+    const c = m.parBook[i];
+    if (!c || !c.some(x => x)) return "";
+    const cel = k => {
+      if (!c[k]) return `<span class="mut">—</span>`;
+      if (suspect[i] && suspect[i][k]) return `<span class="mut" title="écartée">${f2(c[k])}<sup>*</sup></span>`;
+      return best[k] === i ? `<b class="pos">${f2(c[k])}</b>` : f2(c[k]);
+    };
+    return `<div class="lg"><span>${esc(nom)}</span>
+      <b style="min-width:132px;display:inline-flex;justify-content:space-between;gap:12px">
+        <span>${cel(0)}</span><span>${cel(1)}</span><span>${cel(2)}</span></b></div>`;
+  }).join("");
+  const aStar = suspect.some(l => l && l.some(Boolean));
+  return `<h2>Prix par bookmaker</h2>
+    <p style="font-size:12px;color:var(--tx2);margin:0 0 8px">Six opérateurs européens, pris comme
+      <b>référence de prix</b>. Aucun ne propose le mobile money en Côte d'Ivoire : sers-t'en pour juger
+      la cote de ton propre opérateur, pas comme une liste où parier.</p>
+    <div class="lg" style="border-bottom:1px solid var(--bd)"><span class="mut" style="font-size:11.5px">Bookmaker</span>
+      <b style="min-width:132px;display:inline-flex;justify-content:space-between;gap:12px;font-size:11.5px;color:var(--tx3)">
+        <span>1</span><span>N</span><span>2</span></b></div>
+    ${lignes}
+    ${aStar ? `<p style="font-size:11.5px;color:var(--tx3);margin:8px 0 0">
+      * cote s'écartant de plus de 8 % de la médiane : écartée du calcul, probablement périmée.</p>` : ""}`;
+}
+
+/** En-tête affiché pendant une recherche : fiche de l'équipe trouvée puis nombre de résultats. */
+function enteteRecherche(ms) {
+  const eqs = equipesTrouvees();
+  let h = "";
+  if (eqs.length && eqs.length <= 3) {
+    h += eqs.map(e => `<div class="fiche">
+      <div class="ft"><span class="fn">${esc(e.nom)}</span>
+        <span class="fc">${esc(e.champ)} · ${e.rang}<sup>${e.rang === 1 ? "er" : "e"}</sup> sur ${e.total}</span></div>
+      <div class="grid g3">
+        <div class="stat"><i>Attaque</i><b>${e.att.toFixed(2)}</b></div>
+        <div class="stat"><i>Défense</i><b>${e.def.toFixed(2)}</b></div>
+        <div class="stat"><i>Indice</i><b>${e.indice.toFixed(2)}</b></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--tx3);margin-top:8px">
+        Attaque au-dessus de 1 = marque plus que la moyenne du championnat.
+        Défense au-dessus de 1 = encaisse plus, donc défense plus faible.
+        ${e.poids < 5 ? `<span class="tag t-warn" style="margin-left:4px">seulement ${e.poids.toFixed(0)} matchs pondérés</span>` : ""}
+      </div></div>`).join("");
+  }
+  h += `<div class="note info" style="margin-bottom:12px">
+    ${ms.length ? `${ms.length} rencontre${ms.length > 1 ? "s" : ""} à venir` : "Aucune rencontre à venir"}
+    pour « ${esc(recherche)} ». Le filtre par jour est ignoré pendant une recherche.</div>`;
+  return h;
 }
 
 /* ─────────── détail d'un match ─────────── */
@@ -178,6 +311,7 @@ function ouvrirMatch(i) {
         <span style="text-align:right"><b>${f2(c)}</b><br>
           ${e == null ? '<span class="tag t-mut">—</span>' : `<span class="tag ${ok ? "t-pos" : "t-mut"}">${sg(e)}</span>`}</span></div>`;
     }).join("")}
+    ${tableauBooks(m)}
     ${m.cons ? `<h2>Où le modèle diverge du marché</h2>
       <p style="font-size:12px;color:var(--tx2);margin:0 0 8px">Écart en points de pourcentage. Un gros écart ne signale pas
         une occasion : la mesure montre que dans ce face-à-face, c'est le modèle qui se trompe.</p>
@@ -315,20 +449,112 @@ function rendreJournal() {
 function formulairePari(pre) {
   const v = pre || { ev: "", sel: "", cote: "", m: "", p: null, d: aujourdhui() };
   $("#feuille-c").innerHTML = `
-    <div style="font-size:17px;font-weight:650;margin-bottom:14px">Enregistrer un pari</div>
+    <div style="font-size:17px;font-weight:650;margin-bottom:12px">Enregistrer un pari</div>
+    ${pre ? "" : `
+      <div class="recherche" style="padding:0 0 10px">
+        <input id="p-q" type="search" inputmode="search" autocomplete="off"
+               placeholder="Rechercher le match (équipe ou championnat)">
+      </div>
+      <div id="p-res"></div>`}
+    <div id="p-choisi"></div>
     <div class="grid" style="gap:11px">
       <div><label>Événement</label><input id="f-ev" value="${esc(v.ev)}" placeholder="PSG - Marseille"></div>
       <div><label>Sélection</label><input id="f-sel" value="${esc(v.sel)}" placeholder="1"></div>
       <div class="ligne">
-        <div style="flex:1"><label>Cote</label><input type="number" inputmode="decimal" step="0.01" id="f-cote" value="${v.cote}"></div>
+        <div style="flex:1"><label>Cote obtenue</label><input type="number" inputmode="decimal" step="0.01" id="f-cote" value="${v.cote}"></div>
         <div style="flex:1"><label>Mise</label><input type="number" inputmode="numeric" id="f-mise" value="${v.m}"></div>
       </div>
+      <div id="p-repere"></div>
       <div><label>Date</label><input type="date" id="f-date" value="${v.d}"></div>
     </div>
     <button class="btn" style="margin-top:14px" id="f-ok">Enregistrer</button>
     <button class="btn gh" style="margin-top:9px" id="f-non">Annuler</button>`;
   $("#voile").classList.add("on"); $("#feuille").classList.add("on");
   $("#f-non").onclick = fermer;
+
+  /* ── sélecteur de match ── */
+  let choisi = null, proba = null, indexMarche = null;
+  const champ = $("#p-q");
+  if (champ) {
+    let minuteur = null;
+    champ.addEventListener("input", () => {
+      clearTimeout(minuteur);
+      minuteur = setTimeout(listerMatchs, 160);
+    });
+    listerMatchs();
+  }
+  function listerMatchs() {
+    const brut = norm(champ.value), q = ABREVIATIONS[brut] || brut;
+    const boite = $("#p-res");
+    if (!JOUR || q.length < 2) {
+      boite.innerHTML = `<p class="mut" style="font-size:12.5px;margin:0 0 12px">
+        Tape au moins deux lettres, ou remplis les champs à la main pour un événement absent de la liste.</p>`;
+      return;
+    }
+    const mots = q.split(" ").filter(Boolean);
+    const trouves = JOUR.matchs.filter(m => m.d >= aujourdhui())
+      .filter(m => mots.every(w => norm(m.h + " " + m.a + " " + m.nom).includes(w))).slice(0, 8);
+    boite.innerHTML = trouves.length
+      ? trouves.map((m, i) => `<div class="lg" style="cursor:pointer" data-pm="${JOUR.matchs.indexOf(m)}">
+          <span><b>${esc(m.h)} – ${esc(m.a)}</b><br>
+            <span style="font-size:11.5px;color:var(--tx3)">${esc(m.nom)} · ${libJour(m.d)} ${esc(m.heure)}</span></span>
+          <span class="tag t-acc">choisir</span></div>`).join("")
+      : `<p class="mut" style="font-size:12.5px;margin:0 0 12px">Aucun match trouvé. Remplis les champs à la main.</p>`;
+    boite.querySelectorAll("[data-pm]").forEach(l => l.onclick = () => choisirMatch(JOUR.matchs[+l.dataset.pm]));
+  }
+  function choisirMatch(m) {
+    choisi = m;
+    $("#p-res").innerHTML = "";
+    if (champ) champ.value = "";
+    $("#f-ev").value = `${m.h} - ${m.a}`;
+    $("#f-date").value = m.d;
+    const marches = [
+      ["1", m.cH, m.cons && m.cons.H], ["N", m.cD, m.cons && m.cons.D], ["2", m.cA, m.cons && m.cons.A],
+      ["+2,5 buts", m.cO, m.consOU && m.consOU.O], ["-2,5 buts", m.cU, m.consOU && m.consOU.U]
+    ].filter(([, c]) => c);
+    $("#p-choisi").innerHTML = `
+      <div class="fiche" style="margin-bottom:12px">
+        <div class="ft"><span class="fn">${esc(m.h)} – ${esc(m.a)}</span>
+          <span class="fc">${esc(m.nom)} · ${libJour(m.d)}</span></div>
+        <p style="font-size:12px;color:var(--tx2);margin:0 0 9px">Choisis ta sélection, puis remplace la cote
+          par celle réellement proposée par ton opérateur.</p>
+        <div class="pa">${marches.map(([lab, c], i) =>
+          `<button class="puce" data-mk="${i}">${esc(lab)} · ${f2(c)}</button>`).join("")}</div>
+        <button class="btn gh pt" style="margin-top:10px" id="p-autre">Changer de match</button>
+      </div>`;
+    $("#p-choisi").querySelectorAll("[data-mk]").forEach(b => b.onclick = () => {
+      const [lab, c, pm] = marches[+b.dataset.mk];
+      proba = pm || null;
+      indexMarche = ["1", "N", "2"].indexOf(lab);
+      $("#f-sel").value = lab;
+      $("#f-cote").value = f2(c);
+      $("#p-choisi").querySelectorAll("[data-mk]").forEach(x => x.classList.toggle("on", x === b));
+      majRepere();
+    });
+    majRepere();
+  }
+  function majRepere() {
+    const boite = $("#p-repere");
+    if (!proba) { boite.innerHTML = ""; return; }
+    let reference = "";
+    if (choisi && choisi.parBook && JOUR.books && indexMarche != null && indexMarche < 3) {
+      const { best } = analyseBooks(choisi);
+      const i = best[indexMarche];
+      if (i != null) reference = `Meilleur prix relevé : <b>${f2(choisi.parBook[i][indexMarche])}</b> chez ${esc(JOUR.books[i])}. `;
+    }
+    const cote = +$("#f-cote").value;
+    const e = cote > 1 ? margeDe(proba, cote) : null;
+    boite.innerHTML = `<div style="font-size:12px;color:var(--tx2);margin-top:-4px">
+      ${reference}Prix équitable <b>${f2(1 / proba)}</b> (probabilité de marché ${pc(proba, 1)}).
+      ${e == null ? "" : e >= 0
+        ? `<span class="tag t-pos">${sg(e)}</span> à ta cote actuelle.`
+        : `<span class="tag t-neg">${sg(e)}</span> — à cette cote, tu paies plus que ça ne vaut.`}</div>`;
+  }
+  const btnAutre = () => { const b = $("#p-autre"); if (b) b.onclick = () => { choisi = null; proba = null; indexMarche = null; $("#p-choisi").innerHTML = ""; $("#p-repere").innerHTML = ""; listerMatchs(); }; };
+  new MutationObserver(btnAutre).observe($("#p-choisi"), { childList: true });
+  $("#f-cote").addEventListener("input", majRepere);
+
+  /* ── enregistrement ── */
   $("#f-ok").onclick = () => {
     const cote = +$("#f-cote").value, m = +$("#f-mise").value;
     if (!(cote > 1)) return alert("Cote invalide.");
@@ -339,7 +565,7 @@ function formulairePari(pre) {
     if (m > plafond && !confirm(`Mise de ${arg(m)} au-dessus de ton plafond de ${arg(plafond)}. Enregistrer quand même ?`)) return;
     E.journal.push({
       id: Date.now(), date: $("#f-date").value, ev: $("#f-ev").value.trim(),
-      sel: $("#f-sel").value.trim(), cote, mise: m, p: v.p, res: "attente"
+      sel: $("#f-sel").value.trim(), cote, mise: m, p: proba || v.p, res: "attente"
     });
     sauver(); fermer(); aller("journal");
   };
@@ -378,6 +604,16 @@ function rendre() {
 
 /* ─────────── démarrage ─────────── */
 charger(); batirNav(); aller("matchs"); majEntete(); recuperer(false);
+
+const champQ = $("#q"), boutonQ = $("#q-clear");
+let minuteur = null;
+champQ.addEventListener("input", () => {
+  boutonQ.hidden = !champQ.value;
+  clearTimeout(minuteur);
+  minuteur = setTimeout(() => { recherche = champQ.value.trim(); rendreFiltres(); rendreMatchs(); }, 160);
+});
+champQ.addEventListener("search", () => { if (!champQ.value) { recherche = ""; boutonQ.hidden = true; rendreFiltres(); rendreMatchs(); } });
+boutonQ.onclick = () => { champQ.value = ""; recherche = ""; boutonQ.hidden = true; champQ.blur(); rendreFiltres(); rendreMatchs(); };
 
 $("#voile").onclick = fermer;
 $("#b-ajout").onclick = () => formulairePari(null);

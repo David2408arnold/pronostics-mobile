@@ -63,6 +63,9 @@ export function lireResultats(text) {
    meilleur prix à partir des colonnes individuelles, ce qui est vérifiable. */
 const BOOKS_1X2 = [["B365H", "B365D", "B365A"], ["BFDH", "BFDD", "BFDA"], ["BVH", "BVD", "BVA"],
 ["BWH", "BWD", "BWA"], ["PPH", "PPD", "PPA"], ["SKBH", "SKBD", "SKBA"]];
+/* Noms lisibles, dans l'ordre de BOOKS_1X2. Ce sont six opérateurs européens : ils servent
+   de référence de prix, pas de recommandation — voir README. */
+export const NOMS_BOOKS = ["Bet365", "Betfair Sportsbook", "BetVictor", "bwin", "Paddy Power", "Sky Bet"];
 const BOOKS_OU = [["B365>2.5", "B365<2.5"]];
 /* Écart maximal toléré entre un prix et la médiane des bookmakers. Au-delà de 8 %,
    sur un marché aussi liquide que le 1X2, il s'agit d'une cote périmée ou erronée. */
@@ -115,6 +118,7 @@ export function lireFixtures(text) {
     out.push({
       d, heure: (o.Time || "").trim(), div: (o.Div || "").trim(), h, a,
       maxH: p1.max[0], maxD: p1.max[1], maxA: p1.max[2], nb1x2: p1.nb, rejets: p1.rejets,
+      parBook: BOOKS_1X2.map(cols => cols.map(c => num(o[c]))),
       avgH: avg1[0], avgD: avg1[1], avgA: avg1[2],
       maxO: po.max[0], maxU: po.max[1], nbOu: po.nb,
       avgO: avgO[0], avgU: avgO[1]
