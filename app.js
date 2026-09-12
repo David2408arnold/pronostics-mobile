@@ -10,7 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v10";        // à garder aligné avec VERSION dans sw.js
+const VERSION_APP = "v11";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8 };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null, SCORES = null;
@@ -100,7 +100,9 @@ function aller(v) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   document.querySelectorAll("section").forEach(s => s.classList.toggle("on", s.id === "v-" + v));
   $("#filtres").style.display = v === "matchs" ? "" : "none";
-  $("#recherche-box").style.display = v === "matchs" ? "" : "none";
+  $("#recherche-box").style.display = (v === "matchs" || v === "scores") ? "" : "none";
+  $("#q").placeholder = v === "scores"
+    ? "Rechercher une équipe dans l'historique" : "Rechercher une équipe ou un championnat";
   window.scrollTo(0, 0);
   rendre();
 }
@@ -709,6 +711,40 @@ function listerAjout() {
 /* Chaque pronostic est archivé AVANT le match, puis confronté au score réel le lendemain.
    La comparaison avec le marché est affichée à côté : c'est elle qui donne l'échelle. */
 
+/** Bilan recalculé sur n'importe quel sous-ensemble : permet d'afficher les statistiques
+    d'une seule équipe quand une recherche est active. */
+function bilanScores(ms) {
+  const n = ms.length;
+  if (!n) return null;
+  const IX = { "1": 0, "N": 1, "2": 2 };
+  const avecMarche = ms.filter(x => x.okMarche !== null);
+  const avecProbas = ms.filter(x => x.pm);
+  // double chance : on écarte l'issue la moins probable, et on regarde si le résultat tombe dans les deux restantes
+  const dc = (liste, cle) => {
+    const g = liste.filter(x => x[cle]);
+    if (!g.length) return null;
+    const ok = g.filter(x => {
+      const moins = x[cle].indexOf(Math.min(...x[cle]));
+      return IX[x.issueReelle] !== moins;
+    }).length;
+    return { n: g.length, taux: ok / g.length };
+  };
+  return {
+    n,
+    okIssue: ms.filter(x => x.okIssue).length,
+    exact: ms.filter(x => x.exact).length,
+    okMarche: avecMarche.filter(x => x.okMarche).length,
+    nMarche: avecMarche.length,
+    dcModele: dc(avecProbas, "pm"),
+    dcMarche: dc(avecProbas, "pq"),
+    erreurButs: ms.reduce((t, x) => t + Math.abs((x.lH + x.lA) - x.butsReels), 0) / n,
+    erreurEcart: ms.reduce((t, x) => {
+      const [ph, pa] = x.prevu.split("-").map(Number), [rh, ra] = x.reel.split("-").map(Number);
+      return t + Math.abs((ph - pa) - (rh - ra));
+    }, 0) / n
+  };
+}
+
 function rendreScores() {
   if (!SCORES || !SCORES.matchs || !SCORES.matchs.length) {
     $("#s-bilan").innerHTML = `<div class="vide">Aucun résultat encore confronté.<br>
@@ -716,10 +752,23 @@ function rendreScores() {
     $("#s-liste").innerHTML = "";
     return;
   }
-  const B = SCORES.bilan;
-  const tauxModele = B.n ? B.okIssue / B.n : 0;
+  const q = requete();
+  const mots = q.split(" ").filter(Boolean);
+  const tous = SCORES.matchs.filter(x => x.fiable)
+    .filter(x => !E.set.champs.length || E.set.champs.includes(x.div))
+    .filter(x => !q || mots.every(w => norm(x.h + " " + x.a + " " + x.nom).includes(w)));
+  const B = bilanScores(tous);
+  if (!B) {
+    $("#s-bilan").innerHTML = `<div class="vide">Aucun match jugé pour « ${esc(recherche)} ».<br>
+      <span style="font-size:12px">Seules les rencontres déjà jouées apparaissent ici.</span></div>`;
+    $("#s-liste").innerHTML = "";
+    return;
+  }
+  const tauxModele = B.okIssue / B.n;
   const tauxMarche = B.nMarche ? B.okMarche / B.nMarche : null;
   $("#s-bilan").innerHTML = `
+    ${q ? `<div class="note info">Statistiques limitées à « ${esc(recherche)} » : ${B.n} match${B.n > 1 ? "s" : ""} jugé${B.n > 1 ? "s" : ""}.
+      ${B.n < 20 ? "Échantillon trop petit pour en tirer une conclusion." : ""}</div>` : ""}
     <div class="bloc">
       <h2 style="margin-top:0">Ce que vaut le pronostic</h2>
       <div class="grid g2" style="margin-bottom:10px">
@@ -728,10 +777,13 @@ function rendreScores() {
         <div class="stat"><i>Score exact</i><b>${pc(B.exact / B.n, 1)}</b></div>
         <div class="stat"><i>Matchs jugés</i><b>${B.n}</b></div>
       </div>
-      <div class="lg"><span>Erreur moyenne sur le nombre de buts</span><b>${B.erreurButs} but${B.erreurButs > 1 ? "s" : ""}</b></div>
-      <div class="lg"><span>Erreur moyenne sur l'écart au score</span><b>${B.erreurEcart} but${B.erreurEcart > 1 ? "s" : ""}</b></div>
-      ${blocDivergence()}
-      ${blocFiabilite()}
+      ${B.dcModele ? `<div class="lg"><span>En double chance<br>
+        <span style="font-size:11.5px;color:var(--tx3)">on écarte l'issue la moins probable</span></span>
+        <b>${pc(B.dcModele.taux, 1)}${B.dcMarche ? ` <span class="mut">contre</span> ${pc(B.dcMarche.taux, 1)}` : ""}</b></div>` : ""}
+      <div class="lg"><span>Erreur moyenne sur le nombre de buts</span><b>${B.erreurButs.toFixed(2)} but${B.erreurButs > 1 ? "s" : ""}</b></div>
+      <div class="lg"><span>Erreur moyenne sur l'écart au score</span><b>${B.erreurEcart.toFixed(2)} but${B.erreurEcart > 1 ? "s" : ""}</b></div>
+      ${blocDivergence(tous)}
+      ${blocFiabilite(tous)}
       <p style="font-size:12px;color:var(--tx2);margin:11px 0 0">
         Un score exact tombe environ une fois sur ${Math.round(B.n / Math.max(1, B.exact))}.
       </p>
@@ -742,10 +794,10 @@ function rendreScores() {
     </div>`;
 
   const parJour = {};
-  for (const m of SCORES.matchs) (parJour[m.d] ||= []).push(m);
-  const jours = Object.keys(parJour).sort().reverse().slice(0, 10);
+  for (const m of tous) (parJour[m.d] ||= []).push(m);
+  const jours = Object.keys(parJour).sort().reverse().slice(0, q ? 30 : 10);
   $("#s-liste").innerHTML = jours.map(j => {
-    const ms = parJour[j].filter(m => !E.set.champs.length || E.set.champs.includes(m.div));
+    const ms = parJour[j];
     if (!ms.length) return "";
     const bons = ms.filter(m => m.okIssue).length;
     return `<h2>${libJourPasse(j)} <span style="text-transform:none;letter-spacing:0;color:var(--tx3);font-weight:400">
@@ -767,8 +819,8 @@ function rendreScores() {
     taux bruts mélange donc des matchs sur lesquels ils sont d'accord. Le seul
     comparatif qui a du sens porte sur les rencontres où ils divergent — c'est le
     principe du test de McNemar, sur paires discordantes. */
-function blocDivergence() {
-  const ms = (SCORES.matchs || []).filter(x => x.fiable && x.okMarche !== null);
+function blocDivergence(source) {
+  const ms = (source || []).filter(x => x.okMarche !== null);
   if (ms.length < 30) return "";
   const divergents = ms.filter(x => x.issuePrevue !== x.issueMarche);
   const modeleSeul = divergents.filter(x => x.okIssue).length;
@@ -803,8 +855,8 @@ function blocDivergence() {
     temps : il est ré-estimé de zéro chaque matin. Ce qui change, c'est la quantité
     d'historique disponible sur chaque équipe. On mesure donc la précision en fonction
     de ce volume, ce qui est la vraie relation causale. */
-function blocFiabilite() {
-  const ms = (SCORES.matchs || []).filter(x => x.poids != null);
+function blocFiabilite(source) {
+  const ms = (source || []).filter(x => x.poids != null);
   if (ms.length < 60) return "";
   const bandes = [[0, 3, "moins de 3"], [3, 8, "3 à 8"], [8, 999, "plus de 8"]];
   const lignes = bandes.map(([lo, hi, lib]) => {
@@ -1064,10 +1116,10 @@ let minuteur = null;
 champQ.addEventListener("input", () => {
   boutonQ.hidden = !champQ.value;
   clearTimeout(minuteur);
-  minuteur = setTimeout(() => { recherche = champQ.value.trim(); rendreFiltres(); rendreMatchs(); }, 160);
+  minuteur = setTimeout(() => { recherche = champQ.value.trim(); rendre(); }, 160);
 });
-champQ.addEventListener("search", () => { if (!champQ.value) { recherche = ""; boutonQ.hidden = true; rendreFiltres(); rendreMatchs(); } });
-boutonQ.onclick = () => { champQ.value = ""; recherche = ""; boutonQ.hidden = true; champQ.blur(); rendreFiltres(); rendreMatchs(); };
+champQ.addEventListener("search", () => { if (!champQ.value) { recherche = ""; boutonQ.hidden = true; rendre(); } });
+boutonQ.onclick = () => { champQ.value = ""; recherche = ""; boutonQ.hidden = true; champQ.blur(); rendre(); };
 
 $("#c-proposer").onclick = proposerCombine;
 $("#c-vider").onclick = () => { combine = []; rendreCombines(); };

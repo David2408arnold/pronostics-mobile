@@ -269,6 +269,8 @@ for (const [cle, p] of Object.entries(pron.attente)) {
   res.matchs.push({
     d: p.d, div: p.div, nom: p.nom, h: p.h, a: p.a, fiable: p.fiable,
     prevu: p.score, reel: `${vrai.hg}-${vrai.ag}`, poids: p.poids,
+    pm: [r3(p.pH), r3(p.pD), r3(p.pA)],
+    pq: p.cons ? [r3(p.cons.H), r3(p.cons.D), r3(p.cons.A)] : null,
     lH: p.lH, lA: p.lA, butsReels: vrai.hg + vrai.ag,
     issuePrevue, issueReelle, issueMarche,
     pIssueReelle: r3(probas.find(x => x[0] === issueReelle)[1]),

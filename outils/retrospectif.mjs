@@ -83,6 +83,8 @@ for (const div of SUIVIS) {
       sortie.push({
         d: jour, div, nom: CHAMPIONNATS[div] || div, h: m.h, a: m.a,
         fiable: poidsMin >= MIN_MATCHS_FIABLE, poids: r2(poidsMin),
+        pm: [r3(mk.H), r3(mk.D), r3(mk.A)],
+        pq: cons ? [r3(cons[0]), r3(cons[1]), r3(cons[2])] : null,
         prevu, reel, lH: r2(L[0]), lA: r2(L[1]), butsReels: m.hg + m.ag,
         issuePrevue, issueReelle, issueMarche,
         pIssueReelle: r3(probas.find(x => x[0] === issueReelle)[1]),
