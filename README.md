@@ -65,6 +65,22 @@ Betfair Exchange dont les cotes sont brutes de commission.
 comportement correct face à un marché efficace. Le jour de la mise en service, sur 141 matchs
 exploitables, le meilleur écart disponible était de 1,6 % — sous le seuil.
 
+## Les six bookmakers affichés
+
+Bet365, Betfair Sportsbook, BetVictor, bwin, Paddy Power et Sky Bet. Ce sont des opérateurs
+**européens**, retenus parce que football-data publie leurs cotes de façon fiable. Ils servent
+de **référence de prix** : ils permettent de juger si la cote de ton propre opérateur est
+correcte. Aucun d'eux ne propose le mobile money en Côte d'Ivoire, et la plupart n'acceptent
+pas les comptes ivoiriens.
+
+L'application ne classe donc pas les opérateurs par fiabilité de retrait : ce serait une
+information que je n'ai pas les moyens de vérifier, qui change souvent, et se tromper dessus
+coûte de l'argent réel. Pour choisir un opérateur, la seule méthode fiable reste :
+
+1. vérifier son agrément auprès du régulateur local (LONACI) avant tout dépôt ;
+2. faire valider son identité **avant** de déposer, pas au moment du retrait ;
+3. tester un petit retrait par mobile money avant d'engager une somme réelle.
+
 ## Vérifier soi-même
 
 ```bash
