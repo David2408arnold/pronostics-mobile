@@ -10,7 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v16";        // à garder aligné avec VERSION dans sw.js
+const VERSION_APP = "v17";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null, SCORES = null;
@@ -63,6 +63,7 @@ async function recuperer(reseauDabord) {
   if (h) HISTO = h;
   if (f) FORCES = f;
   if (r) SCORES = r;
+  reglerAutomatiquement();
   majEntete(); rendre();
 }
 function majEntete() {
@@ -451,7 +452,8 @@ function ouvrirMatch(i) {
   if (bp) bp.onclick = () => {
     const x = retenus[0];
     fermer();
-    formulairePari({ ev: `${m.h} - ${m.a}`, sel: x.sel, cote: x.cote, m: Math.round(mise(x.p, x.cote)), p: x.p, d: m.d });
+    formulairePari({ ev: `${m.h} - ${m.a}`, sel: nomSelection(m, x.sel), cote: x.cote,
+      m: Math.round(mise(x.p, x.cote)), p: x.p, d: m.d, ref: `${m.d}|${m.h}|${m.a}`, code: x.sel });
   };
 }
 function fermer() { $("#voile").classList.remove("on"); $("#feuille").classList.remove("on"); }
@@ -496,7 +498,8 @@ function rendreSignaux() {
       </div>`).join("");
     $("#liste-signaux").querySelectorAll("button[data-sig]").forEach(btn => btn.onclick = () => {
       const x = sigs[+btn.dataset.sig];
-      formulairePari({ ev: `${x.m.h} - ${x.m.a}`, sel: x.sel, cote: x.cote, m: Math.round(mise(x.p, x.cote)), p: x.p, d: x.m.d });
+      formulairePari({ ev: `${x.m.h} - ${x.m.a}`, sel: nomSelection(x.m, x.sel), cote: x.cote,
+        m: Math.round(mise(x.p, x.cote)), p: x.p, d: x.m.d, ref: `${x.m.d}|${x.m.h}|${x.m.a}`, code: x.sel });
     });
   } else {
     const cl = (JOUR && JOUR.classement || []).filter(c => c.d >= aujourdhui()).slice(0, 10);
@@ -664,7 +667,11 @@ function rendreCombines() {
       ev: `Combiné ${c.n} sélections`,
       sel: combine.map(l => `${JOUR.matchs[l.i].h}-${JOUR.matchs[l.i].a} : ${l.sel}`).join(" / "),
       cote: (c.book ? c.book.cote : c.cote).toFixed(2), m: "", p: c.pMarche,
-      d: combine.map(l => JOUR.matchs[l.i].d).sort().pop()
+      d: combine.map(l => JOUR.matchs[l.i].d).sort().pop(),
+      legs: combine.map(l => {
+        const mm = JOUR.matchs[l.i];
+        return { ref: `${mm.d}|${mm.h}|${mm.a}`, code: l.sel };
+      })
     });
 
     $("#c-legs").innerHTML = `<h2>Les ${c.n} sélections</h2>` + combine.map((l, k) => {
@@ -931,6 +938,93 @@ function libJourPasse(d) {
   return JOURS[dt.getUTCDay()] + " " + dt.getUTCDate() + "/" + String(dt.getUTCMonth() + 1).padStart(2, "0");
 }
 
+/* ─────────── règlement automatique ─────────── */
+/* L'application connaît les scores : demander à l'utilisateur de pointer chaque pari
+   à la main était une corvée et une source d'erreur. Un pari enregistré depuis un
+   match identifié porte une référence, et se règle seul dès le résultat connu.
+   Le CLV se calcule dans la foulée : les cotes de clôture sont déjà archivées. */
+
+/** Vrai si la sélection gagne, faux si elle perd, null si on ne sait pas trancher. */
+function selectionGagnante(code, hg, ag) {
+  switch (code) {
+    case "1": return hg > ag;
+    case "N": return hg === ag;
+    case "2": return hg < ag;
+    case "1X": return hg >= ag;
+    case "12": return hg !== ag;
+    case "X2": return hg <= ag;
+    case "+2,5 buts": return hg + ag > 2.5;
+    case "-2,5 buts": return hg + ag < 2.5;
+    default: return null;
+  }
+}
+/** Probabilité de clôture du marché pour cette sélection, si elle est connue. */
+function probaCloture(pq, code) {
+  if (!pq) return null;
+  const [h, n, a] = pq;
+  switch (code) {
+    case "1": return h; case "N": return n; case "2": return a;
+    case "1X": return h + n; case "12": return h + a; case "X2": return n + a;
+    default: return null;              // pas de cotes de clôture archivées sur les buts
+  }
+}
+/** Index des résultats connus, à partir des deux sources déjà chargées. */
+function indexResultats() {
+  const ix = new Map();
+  const poser = (d, h, a, reel, pq) => {
+    if (!reel) return;
+    const [x, y] = reel.split("-").map(Number);
+    if (!isFinite(x) || !isFinite(y)) return;
+    ix.set(`${d}|${h}|${a}`, { hg: x, ag: y, pq: pq || null });
+  };
+  for (const m of (SCORES && SCORES.matchs) || []) poser(m.d, m.h, m.a, m.reel, m.pq);
+  for (const m of (JOUR && JOUR.matchs) || [])
+    if (m.statut === "FINISHED" && m.score)
+      poser(m.d, m.h, m.a, m.score, m.cons ? [m.cons.H, m.cons.D, m.cons.A] : null);
+  return ix;
+}
+/** Cherche un résultat en tolérant un jour d'écart : les sources ne datent pas
+    toujours une rencontre nocturne le même jour. */
+function chercherResultat(ix, ref) {
+  if (!ref) return null;
+  const [d, h, a] = ref.split("|");
+  for (const dec of [0, -1, 1]) {
+    const j = new Date(Date.parse(d + "T00:00:00Z") + dec * 864e5).toISOString().slice(0, 10);
+    const r = ix.get(`${j}|${h}|${a}`);
+    if (r) return r;
+  }
+  return null;
+}
+
+function reglerAutomatiquement() {
+  if (!SCORES && !JOUR) return 0;
+  const ix = indexResultats();
+  let regles = 0;
+  for (const p of E.journal) {
+    if (p.res && p.res !== "attente") continue;
+    if (p.manuel) continue;                       // l'utilisateur a repris la main
+    const jambes = p.legs && p.legs.length ? p.legs : (p.ref ? [{ ref: p.ref, code: p.code }] : []);
+    if (!jambes.length) continue;
+    let gagne = true, complet = true, clvTotal = 1, clvConnu = true;
+    for (const j of jambes) {
+      const r = chercherResultat(ix, j.ref);
+      if (!r) { complet = false; break; }
+      const issue = selectionGagnante(j.code, r.hg, r.ag);
+      if (issue === null) { complet = false; break; }
+      if (!issue) gagne = false;
+      const pc = probaCloture(r.pq, j.code);
+      if (pc) clvTotal *= pc; else clvConnu = false;
+    }
+    if (!complet) continue;
+    p.res = gagne ? "gagne" : "perdu";
+    p.auto = true;
+    if (clvConnu && clvTotal > 0) p.clv = p.cote * clvTotal - 1;
+    regles++;
+  }
+  if (regles) sauver();
+  return regles;
+}
+
 /* ─────────── journal ─────────── */
 function bilanJournal() {
   const clos = E.journal.filter(p => p.res && p.res !== "attente");
@@ -940,7 +1034,10 @@ function bilanJournal() {
     if (p.res === "gagne") { gain += p.mise * (p.cote - 1); gagnes++; }
     else if (p.res === "perdu") gain -= p.mise;
   }
-  return { n: clos.length, attente: E.journal.length - clos.length, mises, gain, gagnes, rend: mises ? gain / mises : 0 };
+  const avecClv = clos.filter(p => typeof p.clv === "number");
+  const clv = avecClv.length ? avecClv.reduce((t, p) => t + p.clv, 0) / avecClv.length : null;
+  return { n: clos.length, attente: E.journal.length - clos.length, mises, gain, gagnes,
+    rend: mises ? gain / mises : 0, clv, nClv: avecClv.length };
 }
 function perteDuMois() {
   const ym = new Date().toISOString().slice(0, 7);
@@ -958,6 +1055,14 @@ function rendreJournal() {
     <div class="stat"><i>Paris réglés</i><b>${b.n}${b.attente ? ` <span class="mut" style="font-size:11px">+${b.attente}</span>` : ""}</b></div>
     <div class="stat"><i>Résultat</i><b class="${b.gain >= 0 ? "pos" : "neg"}" style="font-size:15px">${b.gain >= 0 ? "+" : ""}${arg(b.gain)}</b></div>
     <div class="stat"><i>Rendement</i><b class="${b.rend >= 0 ? "pos" : "neg"}">${b.n ? (100 * b.rend).toFixed(1) + " %" : "—"}</b></div>`;
+  if (b.nClv) {
+    $("#j-stats").insertAdjacentHTML("beforeend", `
+      <div class="stat" style="grid-column:span 3"><i>CLV moyen sur ${b.nClv} pari${b.nClv > 1 ? "s" : ""}</i>
+        <b class="${b.clv >= 0 ? "pos" : "neg"}">${sg(b.clv)}</b>
+        <span style="font-size:11px;color:var(--tx3);display:block;margin-top:3px">
+          Écart entre la cote que tu as prise et le prix de clôture du marché. Positif de façon
+          répétée, c'est le seul signe fiable d'un avantage réel — bien avant le rendement.</span></div>`);
+  }
   // Ce que la marge explique, et ce qui releve de la chance : la seule decomposition
   // qui dise ou part reellement l'argent.
   if (b.mises > 0) {
@@ -995,7 +1100,9 @@ function rendreJournal() {
     return `<div class="pari">
       <div class="pt"><span class="pn">${esc(p.sel)}</span>
         <b class="${att ? "mut" : g >= 0 ? "pos" : "neg"}">${att ? "en attente" : (g >= 0 ? "+" : "") + arg(g)}</b></div>
-      <div class="pd">${esc(p.ev)} · ${p.date ? new Date(p.date).toLocaleDateString("fr-FR") : ""} · cote ${f2(p.cote)} · mise ${arg(p.mise)}</div>
+      <div class="pd">${esc(p.ev)} · ${p.date ? new Date(p.date).toLocaleDateString("fr-FR") : ""} · cote ${f2(p.cote)} · mise ${arg(p.mise)}
+        ${p.auto ? '<span class="tag t-acc">réglé automatiquement</span>' : ""}
+        ${typeof p.clv === "number" ? `<span class="tag ${p.clv >= 0 ? "t-pos" : "t-mut"}">CLV ${sg(p.clv)}</span>` : ""}</div>
       <div class="pa">${Object.keys(RES).map(k => `<button class="puce ${(p.res || "attente") === k ? "on" : ""}" data-r="${p.id}|${k}">${RES[k]}</button>`).join("")}
         <button class="puce" data-sup="${p.id}" style="margin-left:auto;color:var(--neg)">Supprimer</button></div></div>`;
   }).join("") : `<div class="vide">Aucun pari enregistré.</div>`;
@@ -1003,7 +1110,7 @@ function rendreJournal() {
   $("#liste-paris").querySelectorAll("button[data-r]").forEach(btn => btn.onclick = () => {
     const [id, r] = btn.dataset.r.split("|");
     const p = E.journal.find(x => x.id == id);
-    if (p) { p.res = r; sauver(); rendreJournal(); majEntete(); }
+    if (p) { p.res = r; p.manuel = true; p.auto = false; sauver(); rendreJournal(); majEntete(); }
   });
   $("#liste-paris").querySelectorAll("button[data-sup]").forEach(btn => btn.onclick = () => {
     if (!confirm("Supprimer ce pari ?")) return;
@@ -1038,6 +1145,7 @@ function formulairePari(pre) {
 
   /* ── sélecteur de match ── */
   let choisi = null, proba = null, indexMarche = null;
+  let refChoisi = null, codeChoisi = null;
   const champ = $("#p-q");
   if (champ) {
     let minuteur = null;
@@ -1090,6 +1198,8 @@ function formulairePari(pre) {
       const [lab, c, pm] = marches[+b.dataset.mk];
       proba = pm || null;
       indexMarche = ["1", "N", "2"].indexOf(lab);
+      refChoisi = `${choisi.d}|${choisi.h}|${choisi.a}`;
+      codeChoisi = lab;
       $("#f-sel").value = lab;
       $("#f-cote").value = f2(c);
       $("#p-choisi").querySelectorAll("[data-mk]").forEach(x => x.classList.toggle("on", x === b));
@@ -1129,7 +1239,9 @@ function formulairePari(pre) {
     if (m > plafond && !confirm(`Mise de ${arg(m)} au-dessus de ton plafond de ${arg(plafond)}. Enregistrer quand même ?`)) return;
     E.journal.push({
       id: Date.now(), date: $("#f-date").value, ev: $("#f-ev").value.trim(),
-      sel: $("#f-sel").value.trim(), cote, mise: m, p: proba || v.p, res: "attente"
+      sel: $("#f-sel").value.trim(), cote, mise: m, p: proba || v.p, res: "attente",
+      ref: refChoisi || v.ref || null, code: codeChoisi || v.code || null,
+      legs: v.legs || null
     });
     sauver(); fermer(); aller("journal");
   };
