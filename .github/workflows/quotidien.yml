@@ -25,8 +25,16 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Associer les equipes de l API
+        run: node outils/associer-equipes.mjs
+        env:
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
+        continue-on-error: true
+
       - name: Construire les donnees du jour
         run: node outils/construire.mjs
+        env:
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
 
       - name: Verifier la sortie
         run: |

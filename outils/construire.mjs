@@ -75,6 +75,61 @@ for (const div of SUIVIS) {
 }
 console.log(`   ${nbFichiers} fichiers, ${Object.values(resultats).flat().length} matchs au total`);
 
+/* ─────────── 1 bis. résultats récents via l'API ─────────── */
+/* Les CSV de football-data.co.uk accusent 3 à 6 jours de retard : mesuré le 12/09/2026,
+   la Ligue 1 s'arrêtait au 06/09. L'API football-data.org publie les scores environ
+   3 h 30 après le coup de sifflet. On complète donc les CSV avec elle.
+   Les équipes sont associées par signature de résultats, jamais par leur nom :
+   voir outils/associer-equipes.mjs. */
+const TOKEN = process.env.FOOTBALL_DATA_TOKEN;
+const API_DIV = { PL: "E0", ELC: "E1", FL1: "F1", BL1: "D1", SA: "I1", DED: "N1", PPL: "P1", PD: "SP1" };
+let ajoutsApi = 0, ignoresApi = 0;
+
+if (!TOKEN) {
+  console.log("1 bis. FOOTBALL_DATA_TOKEN absent, on s'en tient aux CSV");
+} else {
+  console.log("1 bis. Résultats récents via l'API");
+  let assoc = {};
+  const cheminAssoc = join(DOSSIER, "equipes-api.json");
+  if (existsSync(cheminAssoc)) { try { assoc = JSON.parse(readFileSync(cheminAssoc, "utf8")); } catch { } }
+
+  const dISO = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+  let recents = null;
+  try {
+    const r = await fetch(`https://api.football-data.org/v4/matches?dateFrom=${dISO(9)}&dateTo=${dISO(0)}`,
+      { headers: { "X-Auth-Token": TOKEN }, signal: AbortSignal.timeout(30000) });
+    const j = await r.json();
+    if (j.errorCode) throw new Error(j.message);
+    recents = j.matches || [];
+  } catch (e) { console.log("   ! API indisponible : " + e.message + " — on continue sans"); }
+
+  if (recents) {
+    for (const div of SUIVIS) {
+      const connus = new Set(resultats[div].map(m => `${iso(m.d)}|${m.h}|${m.a}`));
+      for (const m of recents) {
+        if (m.status !== "FINISHED" || m.score.fullTime.home == null) continue;
+        const d = API_DIV[m.competition.code];
+        if (d !== div) continue;
+        const t = assoc[div] || {};
+        const h = t[m.homeTeam.id], a = t[m.awayTeam.id];
+        if (!h || !a) { ignoresApi++; continue; }          // association inconnue : on n'invente rien
+        const jour = Date.parse(m.utcDate.slice(0, 10) + "T00:00:00Z");
+        // le CSV peut dater le match de la veille : on teste les trois jours
+        const deja = [-1, 0, 1].some(k => connus.has(`${iso(jour + k * 864e5)}|${h}|${a}`));
+        if (deja) continue;
+        resultats[div].push({
+          d: jour, div, h, a, hg: m.score.fullTime.home, ag: m.score.fullTime.away,
+          oh: null, od: null, oa: null, ht: null, at: null, htc: null, atc: null, source: "api"
+        });
+        connus.add(`${iso(jour)}|${h}|${a}`);
+        ajoutsApi++;
+      }
+    }
+    console.log(`   ${ajoutsApi} résultats ajoutés que les CSV n'avaient pas encore`
+      + (ignoresApi ? `, ${ignoresApi} ignorés faute d'association` : ""));
+  }
+}
+
 console.log("2. Téléchargement des matchs à venir");
 const brut = await telecharger(`${BASE}/fixtures.csv`);
 if (!brut) { console.error("ERREUR : fixtures.csv indisponible, arrêt sans modifier les données existantes."); process.exit(1); }

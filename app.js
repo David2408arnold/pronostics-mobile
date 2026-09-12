@@ -10,7 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v14";        // à garder aligné avec VERSION dans sw.js
+const VERSION_APP = "v15";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null, SCORES = null;
