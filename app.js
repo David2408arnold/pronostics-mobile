@@ -212,6 +212,35 @@ function rendreMatchs() {
   $("#liste-matchs").querySelectorAll(".match").forEach(c => c.onclick = () => ouvrirMatch(+c.dataset.i));
 }
 
+/** Double chance : on couvre deux issues sur trois. Les cotes de ce marché ne figurent
+    dans aucune source disponible, mais le prix équitable se déduit directement des
+    probabilités de marché — c'est exactement ce qu'il faut pour juger l'offre d'un
+    opérateur, qui charge en général une marge plus lourde sur ce marché. */
+const DC = [
+  ["1X", "domicile ou nul", ["H", "D"], ["pH", "pD"]],
+  ["12", "pas de nul", ["H", "A"], ["pH", "pA"]],
+  ["X2", "nul ou extérieur", ["D", "A"], ["pD", "pA"]]
+];
+function doubleChance(m) {
+  if (!m.cons) return "";
+  return `<h2>Double chance</h2>
+    <p style="font-size:12px;color:var(--tx2);margin:0 0 8px">Deux issues couvertes sur trois : ça passe
+      beaucoup plus souvent, mais la cote est bien plus basse. Aucune source ne publie les cotes de ce
+      marché — compare le prix équitable ci-dessous à celui de ton opérateur.</p>
+    ${DC.map(([code, libelle, kc, km]) => {
+      const pm = m.cons[kc[0]] + m.cons[kc[1]];
+      const pmod = m[km[0]] + m[km[1]];
+      return `<div class="lg">
+        <span><b>${code}</b> · ${libelle}<br><span style="font-size:11.5px;color:var(--tx3)">
+          marché ${pc(pm, 1)} · modèle ${pc(pmod, 1)}</span></span>
+        <span style="text-align:right"><b>${f2(1 / pm)}</b><br>
+          <span style="font-size:11px;color:var(--tx3)">${pm > 0.9 ? "rarement proposé" : "prix équitable"}</span></span></div>`;
+    }).join("")}
+    <p style="font-size:11.5px;color:var(--tx3);margin:8px 0 0">
+      Si ton opérateur propose moins que ces cotes, la différence est sa marge. Sur la double chance
+      elle dépasse souvent 10 %, parce que le marché paraît rassurant.</p>`;
+}
+
 /** Meilleur bookmaker par issue, et prix jugés non crédibles.
     Retourne { best:[i,i,i], suspect:[[bool]] } */
 function analyseBooks(m) {
@@ -391,6 +420,7 @@ function ouvrirMatch(i) {
         <span style="text-align:right"><b>${f2(c)}</b><br>
           ${e == null ? '<span class="tag t-mut">—</span>' : `<span class="tag ${ok ? "t-pos" : "t-mut"}">${sg(e)}</span>`}</span></div>`;
     }).join("")}
+    ${doubleChance(m)}
     ${tableauBooks(m)}
     ${comparateur(m)}
     ${m.cons ? `<h2>Où le modèle diverge du marché</h2>
@@ -481,6 +511,17 @@ function rendreSignaux() {
 
 const TAILLES = [2, 3, 4, 5, 8, 10];
 
+/** Libellé lisible d'une sélection, y compris les doubles chances. */
+function nomSelection(m, sel) {
+  if (sel === "1") return m.h;
+  if (sel === "2") return m.a;
+  if (sel === "N") return "Match nul";
+  if (sel === "1X") return `${m.h} ou nul`;
+  if (sel === "12") return `${m.h} ou ${m.a}`;
+  if (sel === "X2") return `Nul ou ${m.a}`;
+  return sel;
+}
+
 /** Issue la plus probable d'un match selon le marché, avec son meilleur prix. */
 function favori(m) {
   if (!m.cons) return null;
@@ -511,16 +552,21 @@ function calculCombine() {
     const m = JOUR.matchs[l.i];
     cote *= l.cote;
     pMarche *= l.p;
-    pModele *= (l.sel === "1" ? m.pH : l.sel === "N" ? m.pD : m.pA);
+    const dc = DC.find(x => x[0] === l.sel);
+    pModele *= dc ? (m[dc[3][0]] + m[dc[3][1]])
+      : (l.sel === "1" ? m.pH : l.sel === "N" ? m.pD : m.pA);
   }
   const mOp = Math.max(0, E.set.margeOp / 100);
   const parSelection = 1 / (1 + mOp);          // ce qui reste après la marge, par sélection
+  /* Le prix d'une double chance est déjà estimé marge comprise : lui réappliquer le
+     coefficient la compterait deux fois. On ne l'applique qu'aux prix réellement relevés. */
+  const apresMarge = combine.reduce((t, l) => t * (l.estime ? 1 : parSelection), 1);
 
   /* Un combiné se place chez UN SEUL opérateur : additionner les meilleurs prix de
      six bookmakers différents donnerait une cote que personne ne propose. On calcule
      donc la cote totale bookmaker par bookmaker, et on retient le meilleur. */
   let book = null;
-  if (JOUR.books) {
+  if (JOUR.books && !combine.some(l => l.estime)) {
     const IX = { "1": 0, "N": 1, "2": 2 };
     JOUR.books.forEach((nom, b) => {
       let produit = 1;
@@ -538,7 +584,7 @@ function calculCombine() {
     cote, pMarche, pModele, n: combine.length,
     book,                                        // meilleur bookmaker unique, si connu
     espBook: book ? pMarche * book.cote : null,
-    espOp: pMarche * cote * Math.pow(parSelection, combine.length),
+    espOp: pMarche * cote * apresMarge,
     uneFoisSur: 1 / pMarche
   };
 }
@@ -565,7 +611,7 @@ function rendreCombines() {
           <div class="stat"><i>Cote totale</i><b>${(c.book ? c.book.cote : c.cote).toFixed(2)}</b></div>
           <div class="stat"><i>Chances que ça passe</i><b>${pc(c.pMarche, 1)}</b></div>
         </div>
-        <div class="lg"><span>À jouer en moyenne</span><b>${c.uneFoisSur.toFixed(0)} fois pour en gagner 1</b></div>
+        <div class="lg"><span>À jouer en moyenne</span><b>${c.uneFoisSur < 5 ? c.uneFoisSur.toFixed(1) : c.uneFoisSur.toFixed(0)} fois pour en gagner 1</b></div>
         ${c.book ? `<div class="lg"><span>Meilleur bookmaker unique<br>
           <span style="font-size:11.5px;color:var(--tx3)">${esc(c.book.nom)} · cote ${c.book.cote.toFixed(2)}</span></span>
           <b class="${c.espBook >= 1 ? "pos" : "neg"}">${(100 * c.espBook).toFixed(0)} rendus pour 100 misés</b></div>` : ""}
@@ -579,8 +625,12 @@ function rendreCombines() {
             : "Un combiné n'améliore jamais l'espérance : il agrandit le lot et raréfie les gains."}
         </div>
         <p style="font-size:11.5px;color:var(--tx3);margin:8px 0 0">
-          Un combiné se place chez un seul opérateur : la cote affichée est celle du meilleur
-          bookmaker unique, pas un assemblage des meilleurs prix de plusieurs sites.</p>
+          ${combine.some(l => l.estime)
+            ? `Ce combiné contient au moins une double chance, dont la cote n'est publiée nulle part :
+               elle est estimée à partir du prix équitable et de la marge que tu as renseignée (~).
+               La comparaison entre bookmakers est donc désactivée.`
+            : `Un combiné se place chez un seul opérateur : la cote affichée est celle du meilleur
+               bookmaker unique, pas un assemblage des meilleurs prix de plusieurs sites.`}</p>
         <div class="grid g2" style="margin-top:12px">
           <div class="stat"><i>Proba selon le modèle</i><b>${pc(c.pModele, 1)}</b></div>
           <div class="stat"><i>Gain pour 1 000 ${E.set.cur}</i><b>${Math.round(1000 * (c.book ? c.book.cote : c.cote)).toLocaleString("fr-FR")}</b></div>
@@ -596,7 +646,7 @@ function rendreCombines() {
 
     $("#c-legs").innerHTML = `<h2>Les ${c.n} sélections</h2>` + combine.map((l, k) => {
       const m = JOUR.matchs[l.i];
-      const nom = l.sel === "1" ? m.h : l.sel === "2" ? m.a : "Match nul";
+      const nom = nomSelection(m, l.sel);
       return `<div class="pari">
         <div class="pt"><span class="pn">${esc(nom)}</span><b>${f2(l.cote)}</b></div>
         <div class="pd">${esc(m.h)} – ${esc(m.a)} · ${esc(m.nom)} · ${libJour(m.d)} ${esc(m.heure)} · marché ${pc(l.p, 1)}</div>
@@ -628,16 +678,24 @@ function listerAjout() {
   boite.innerHTML = trouves.length ? trouves.map(({ m, i }) => {
     const opts = [["1", m.cons && m.cons.H, m.cH], ["N", m.cons && m.cons.D, m.cD], ["2", m.cons && m.cons.A, m.cA]]
       .filter(([, p, c]) => p && c);
+    // double chance : prix estimé à partir du prix équitable et de la marge de l'opérateur
+    // au-dela de 90 % la double chance ne se joue pas : le prix tombe si bas qu'aucun
+    // operateur ne le propose, et le pari n'a plus de sens
+    const dc = m.cons ? DC.map(([code, , kc]) => {
+      const p = m.cons[kc[0]] + m.cons[kc[1]];
+      const prix = Math.max(1.01, (1 / p) / (1 + E.set.margeOp / 100));
+      return [code, p, prix, true];
+    }).filter(([, p]) => p <= 0.90) : [];
     return `<div style="margin-bottom:11px">
       <div style="font-size:13.5px;font-weight:600">${esc(m.h)} – ${esc(m.a)}</div>
       <div style="font-size:11.5px;color:var(--tx3);margin-bottom:5px">${esc(m.nom)} · ${libJour(m.d)}</div>
-      <div class="pa">${opts.map(([sel, p, co]) =>
-        `<button class="puce" data-add="${i}|${sel}|${p}|${co}">${sel} · ${f2(co)}</button>`).join("")}</div></div>`;
+      <div class="pa">${[...opts, ...dc].map(([sel, p, co, est]) =>
+        `<button class="puce" data-add="${i}|${sel}|${p}|${co}|${est ? 1 : 0}">${sel} · ${f2(co)}${est ? " ~" : ""}</button>`).join("")}</div></div>`;
   }).join("") : '<p class="mut" style="font-size:12.5px;margin:0">Aucun match trouvé.</p>';
   boite.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
-    const [i, sel, p, co] = b.dataset.add.split("|");
+    const [i, sel, p, co, est] = b.dataset.add.split("|");
     if (combine.length >= 12) return alert("Douze sélections, c'est déjà bien au-delà du raisonnable.");
-    combine.push({ i: +i, sel, p: +p, cote: +co });
+    combine.push({ i: +i, sel, p: +p, cote: +co, estime: est === "1" });
     champ.value = "";
     rendreCombines();
   });
@@ -669,6 +727,7 @@ function rendreScores() {
       <div class="lg"><span>Erreur moyenne sur le nombre de buts</span><b>${B.erreurButs} but${B.erreurButs > 1 ? "s" : ""}</b></div>
       <div class="lg"><span>Erreur moyenne sur l'écart au score</span><b>${B.erreurEcart} but${B.erreurEcart > 1 ? "s" : ""}</b></div>
       ${blocDivergence()}
+      ${blocFiabilite()}
       <p style="font-size:12px;color:var(--tx2);margin:11px 0 0">
         Un score exact tombe environ une fois sur ${Math.round(B.n / Math.max(1, B.exact))}.
       </p>
@@ -734,6 +793,41 @@ function blocDivergence() {
            p sous 0,05). La mesure décisive est ailleurs : sur 6 050 matchs, le modèle prédit
            moins bien que le marché de façon nette — voir l'onglet Réglages.`}
     </div>`;
+}
+
+/** « Les pronostics deviennent-ils plus fiables ? » — le modèle n'apprend pas au fil du
+    temps : il est ré-estimé de zéro chaque matin. Ce qui change, c'est la quantité
+    d'historique disponible sur chaque équipe. On mesure donc la précision en fonction
+    de ce volume, ce qui est la vraie relation causale. */
+function blocFiabilite() {
+  const ms = (SCORES.matchs || []).filter(x => x.poids != null);
+  if (ms.length < 60) return "";
+  const bandes = [[0, 3, "moins de 3"], [3, 8, "3 à 8"], [8, 999, "plus de 8"]];
+  const lignes = bandes.map(([lo, hi, lib]) => {
+    const g = ms.filter(x => x.poids >= lo && x.poids < hi);
+    if (g.length < 20) return null;
+    const ok = g.filter(x => x.okIssue).length;
+    const err = g.reduce((t, x) => t + Math.abs((x.lH + x.lA) - x.butsReels), 0) / g.length;
+    return { lib, n: g.length, taux: ok / g.length, err };
+  }).filter(Boolean);
+  if (lignes.length < 2) return "";
+  const faible = lignes[0], fort = lignes[lignes.length - 1];
+  return `
+    <h2 style="margin-top:16px">Est-ce que ça devient plus fiable ?</h2>
+    <p style="font-size:12px;color:var(--tx2);margin:0 0 9px">
+      Le modèle n'apprend pas avec le temps : il est recalculé de zéro chaque matin. Ce qui change,
+      c'est la quantité de matchs déjà joués par les deux équipes. Précision selon cet historique :</p>
+    ${lignes.map(l => `<div class="lg">
+      <span>${l.lib} matchs pondérés<br><span style="font-size:11.5px;color:var(--tx3)">${l.n} rencontres · erreur ${l.err.toFixed(2)} but</span></span>
+      <b class="${l.taux >= 0.5 ? "pos" : "neg"}">${pc(l.taux, 1)}</b></div>`).join("")}
+    <p style="font-size:12px;color:var(--tx2);margin:10px 0 0">
+      ${fort.taux > faible.taux
+        ? `Oui, mécaniquement : ${(100 * (fort.taux - faible.taux)).toFixed(1)} points d'écart entre les
+           équipes peu connues et celles bien documentées. En début de saison beaucoup de matchs
+           tombent dans la première catégorie ; à mesure que les journées passent, ils deviennent
+           minoritaires et la précision moyenne monte. Elle plafonne ensuite.`
+        : `Pas sur cet échantillon : l'historique disponible ne change pas nettement la précision.`}
+    </p>`;
 }
 
 function libJourPasse(d) {

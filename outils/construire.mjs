@@ -248,7 +248,7 @@ for (const m of matchs) {
     d: m.d, div: m.div, nom: m.nom, heure: m.heure, h: m.h, a: m.a,
     score: m.score, lH: m.lH, lA: m.lA,
     pH: m.pH, pD: m.pD, pA: m.pA,
-    cons: m.cons, fiable: m.fiable, pose: new Date().toISOString().slice(0, 10)
+    cons: m.cons, fiable: m.fiable, poids: m.poids, pose: new Date().toISOString().slice(0, 10)
   };
   archives++;
 }
@@ -268,7 +268,7 @@ for (const [cle, p] of Object.entries(pron.attente)) {
   const issueMarche = consProbas ? consProbas.reduce((x, y) => y[1] > x[1] ? y : x)[0] : null;
   res.matchs.push({
     d: p.d, div: p.div, nom: p.nom, h: p.h, a: p.a, fiable: p.fiable,
-    prevu: p.score, reel: `${vrai.hg}-${vrai.ag}`,
+    prevu: p.score, reel: `${vrai.hg}-${vrai.ag}`, poids: p.poids,
     lH: p.lH, lA: p.lA, butsReels: vrai.hg + vrai.ag,
     issuePrevue, issueReelle, issueMarche,
     pIssueReelle: r3(probas.find(x => x[0] === issueReelle)[1]),
