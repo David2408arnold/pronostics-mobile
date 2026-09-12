@@ -10,7 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v12";        // à garder aligné avec VERSION dans sw.js
+const VERSION_APP = "v13";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null, SCORES = null;
@@ -802,6 +802,14 @@ function rendreScores() {
       <p style="font-size:12px;color:var(--tx2);margin:11px 0 0">
         Un score exact tombe environ une fois sur ${Math.round(B.n / Math.max(1, B.exact))}.
       </p>
+      <div class="note info" style="margin-top:11px">
+        <b>Le score le plus probable et l'issue pronostiquée diffèrent souvent</b> — dans deux
+        tiers des matchs. 1-1 est fréquemment le score isolé le plus probable (environ 11 %),
+        alors que la victoire à domicile reste l'issue la plus probable une fois additionnés
+        tous les scores qui la composent : 1-0, 2-0, 2-1, 3-1… Les cartes ci-dessous affichent
+        donc l'issue pronostiquée en premier, puisque c'est elle qui est jugée, et le score le
+        plus probable en dessous à titre indicatif.
+      </div>
       ${SCORES.matchs.some(x => x.reconstruit) ? `<p style="font-size:11.5px;color:var(--tx3);margin:9px 0 0">
         Les journées antérieures à l'installation sont marquées « reconstruit » : le modèle y a été
         réajusté sur les seuls matchs antérieurs à chaque rencontre, mais ces pronostics n'ont pas
@@ -821,12 +829,16 @@ function rendreScores() {
         <div class="sh"><span class="sn">${esc(m.h)} – ${esc(m.a)}</span>
           <span class="sco">${esc(m.reel)}</span></div>
         <div class="sd">
-          <span>prévu <b style="color:var(--tx2)">${esc(m.prevu)}</b></span>
-          <span>attendu ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</span>
-          <span class="tag ${m.exact ? "t-acc" : m.okIssue ? "t-pos" : "t-mut"}">
-            ${m.exact ? "score exact" : m.okIssue ? "issue trouvée" : "raté"}</span>
+          <span>pronostic <b style="color:var(--tx2)">${esc(nomIssue(m, m.issuePrevue))}</b></span>
+          <span class="tag ${m.okIssue ? "t-pos" : "t-mut"}">${m.okIssue ? "issue trouvée" : "raté"}</span>
+          ${m.exact ? '<span class="tag t-acc">score exact</span>' : ""}
           ${m.reconstruit ? '<span class="tag t-mut">reconstruit</span>' : ""}
           ${!m.fiable ? '<span class="tag t-warn">peu de données</span>' : ""}
+        </div>
+        <div class="sd" style="margin-top:2px">
+          <span>score le plus probable ${esc(m.prevu)}${issueDuScore(m.prevu) !== m.issuePrevue
+            ? ' <span title="un score de 1-1 peut être le plus probable alors que la victoire à domicile reste l\'issue la plus probable">·</span>' : ""}</span>
+          <span>buts attendus ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</span>
         </div></div>`).join("");
   }).join("") || `<div class="vide">Aucun match pour les championnats sélectionnés.</div>`;
 }
@@ -900,6 +912,15 @@ function blocFiabilite(source) {
         : `Pas sur cet échantillon : l'historique disponible ne change pas nettement la précision.`}
     </p>`;
 }
+
+/** Nom lisible d'une issue 1 / N / 2 pour une ligne d'historique. */
+function nomIssue(m, code) {
+  return code === "1" ? m.h : code === "2" ? m.a : "Match nul";
+}
+const issueDuScore = sc => {
+  const [a, b] = String(sc).split("-").map(Number);
+  return a > b ? "1" : a === b ? "N" : "2";
+};
 
 function libJourPasse(d) {
   if (d === aujourdhui()) return "Aujourd'hui";
