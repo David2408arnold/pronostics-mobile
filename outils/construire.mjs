@@ -9,7 +9,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  lireResultats, lireFixtures, ajuster, lambdas, grille, marches,
+  lireResultats, lireFixtures, ajuster, ajusterMixte, lambdas, grille, marches,
   sansMarge, marge, apparier, CHAMPIONNATS, NOMS_BOOKS
 } from "./modele.mjs";
 
@@ -87,7 +87,7 @@ const modeles = {}, forces = {}, infos = {};
 for (const div of SUIVIS) {
   const ms = resultats[div];
   if (!ms || ms.length < 150) { console.log(`   ${div.padEnd(4)} ignoré (${ms ? ms.length : 0} matchs, trop peu)`); continue; }
-  const M = ajuster(ms, { demiVie: DEMI_VIE, regul: REGUL });
+  const M = ajusterMixte(ms, { demiVie: DEMI_VIE, regul: REGUL });
   modeles[div] = M;
   infos[div] = {
     nom: CHAMPIONNATS[div] || div, matchs: M.n, equipes: M.teams.length,

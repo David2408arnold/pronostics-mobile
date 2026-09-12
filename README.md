@@ -41,6 +41,28 @@ L'optimum est `w = 0`. Chaque point de poids donné au modèle dégrade la préd
 Le modèle est donc affiché comme lecture d'un match — buts attendus, score probable —
 mais ne déclenche jamais un signal.
 
+**1 bis. Les tirs cadrés apportent un peu, mais seulement mélangés aux buts.**
+`outils/tester-xg.mjs` estime les forces sur différentes réponses, en walk-forward sur
+6 018 matchs. Un but est un événement rare donc bruité ; les tirs cadrés corrigent une partie
+de ce bruit, mais pris seuls ils font moins bien.
+
+| réponse | log-loss |
+|---|---|
+| buts seuls | 0,98888 |
+| tirs cadrés seuls | 0,99549 |
+| tous les tirs | 1,00613 |
+| **moyenne buts + tirs cadrés** | **0,98745** |
+
+Le mélange gagne ou égalise sur les cinq championnats testés : il est donc retenu
+(`ajusterMixte`). Sur l'historique, l'issue correcte passe de 50,9 % à 52,7 %. Cela ne change
+rien au constat principal : le marché reste devant de 0,023.
+
+**1 ter. La forme récente n'aide pas.** `outils/tester-forme.mjs` balaie la pondération
+temporelle sur 6 019 matchs. Plus on privilégie les matchs récents, plus on prédit mal, sans
+exception : demi-vie de 30 jours 1,02031, de 90 jours 0,99528, de 180 jours 0,98910, de
+365 jours 0,98822. Mélanger une vue courte au modèle dégrade aussi. La « forme » est
+essentiellement du bruit ; la force d'une équipe bouge lentement.
+
 **2. Le retrait de marge proportionnel est biaisé.** `outils/comparer-marge.mjs` compare trois
 méthodes sur 7 988 matchs. La méthode de la puissance (chercher `k` tel que `Σ (1/cote)^k = 1`)
 gagne en log-loss et en calibration, en particulier sur les favoris :

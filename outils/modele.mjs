@@ -45,6 +45,8 @@ export function lireResultats(text) {
     if (hg == null || ag == null || !h || !a) continue;
     out.push({
       d, div: (o.Div || "").trim(), h, a, hg, ag,
+      // tirs et tirs cadres : matiere premiere d'un substitut de xG
+      ht: num(o.HS), at: num(o.AS), htc: num(o.HST), atc: num(o.AST),
       oh: firstNum(o, ["AvgCH", "B365CH", "AvgH", "B365H"]),
       od: firstNum(o, ["AvgCD", "B365CD", "AvgD", "B365D"]),
       oa: firstNum(o, ["AvgCA", "B365CA", "AvgA", "B365A"])
@@ -133,7 +135,7 @@ export const pois = (k, l) => Math.exp(-l) * Math.pow(l, k) / FACT[k];
 
 /* ─────────── estimation des forces ─────────── */
 export function ajuster(ms, opts = {}) {
-  const { demiVie = 180, regul = 2.5, iters = 200 } = opts;
+  const { demiVie = 180, regul = 2.5, iters = 200, estimerRho = true } = opts;
   if (!ms.length) return null;
   const ref = opts.ref || Math.max(...ms.map(m => m.d));
   const HL = demiVie * 864e5;
@@ -187,10 +189,42 @@ export function ajuster(ms, opts = {}) {
     }
     return s;
   };
-  let best = 0, bv = ll(0);
-  for (let r = -0.24; r <= 0.14; r += 0.02) { const v = ll(r); if (v > bv) { bv = v; best = r; } }
-  for (let r = best - 0.02; r <= best + 0.02; r += 0.004) { const v = ll(r); if (v > bv) { bv = v; best = r; } }
+  /* rho suppose des buts entiers : sur une reponse continue comme les xG, on ne
+     l'estime pas ici et on reprend celui du modele ajuste sur les buts reels. */
+  let best = 0;
+  if (estimerRho) {
+    let bv = ll(0);
+    for (let r = -0.24; r <= 0.14; r += 0.02) { const v = ll(r); if (v > bv) { bv = v; best = r; } }
+    for (let r = best - 0.02; r <= best + 0.02; r += 0.004) { const v = ll(r); if (v > bv) { bv = v; best = r; } }
+  }
   return { teams, ix, att, def, c, g, rho: best, n: ms.length, ref, wn };
+}
+
+/** Ajustement retenu : moyenne des buts et des tirs cadrés convertis au taux du
+    championnat. Un but est un événement rare donc bruité ; les tirs cadrés corrigent
+    une partie de ce bruit sans emporter le modèle, car pris seuls ils font moins bien.
+    Mesuré en walk-forward sur 6 018 matchs (outils/tester-xg.mjs) :
+      buts seuls 0,98888 · tirs cadrés seuls 0,99549 · mélange 0,98745.
+    Le mélange gagne ou égalise sur les cinq championnats testés.
+    rho reste estimé sur les buts réels : il suppose des scores entiers. */
+export function ajusterMixte(ms, opts = {}) {
+  const surButs = ajuster(ms, opts);
+  if (!surButs) return null;
+  let buts = 0, tirs = 0;
+  for (const m of ms) {
+    if (m.htc == null || m.atc == null) continue;
+    buts += m.hg + m.ag; tirs += m.htc + m.atc;
+  }
+  if (tirs <= 0) return surButs;                  // pas de tirs disponibles : on garde les buts
+  const taux = buts / tirs;
+  const melange = ms.map(m => (m.htc == null || m.atc == null) ? m : {
+    ...m,
+    hg: (m.hg + m.htc * taux) / 2,
+    ag: (m.ag + m.atc * taux) / 2
+  });
+  const M = ajuster(melange, { ...opts, estimerRho: false });
+  if (!M) return surButs;
+  return { ...M, rho: surButs.rho, conversion: taux };
 }
 
 export function lambdas(M, home, away) {

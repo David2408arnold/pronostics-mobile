@@ -10,7 +10,7 @@
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lireResultats, ajuster, lambdas, grille, marches, sansMarge, CHAMPIONNATS } from "./modele.mjs";
+import { lireResultats, ajusterMixte, lambdas, grille, marches, sansMarge, CHAMPIONNATS } from "./modele.mjs";
 
 const RACINE = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DOSSIER = join(RACINE, "donnees");
@@ -65,7 +65,7 @@ for (const div of SUIVIS) {
     const t0 = Date.parse(jour + "T00:00:00Z");
     const passe = ms.filter(m => m.d < t0);                 // strictement antérieur
     if (passe.length < 150) continue;
-    const M = ajuster(passe, { demiVie: DEMI_VIE, regul: REGUL, ref: t0, iters: 80 });
+    const M = ajusterMixte(passe, { demiVie: DEMI_VIE, regul: REGUL, ref: t0, iters: 80 });
     for (const m of ms.filter(x => iso(x.d) === jour)) {
       const L = lambdas(M, m.h, m.a);
       if (!L) continue;
