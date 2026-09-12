@@ -10,6 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
+const VERSION_APP = "v10";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8 };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null, SCORES = null;
@@ -216,10 +217,12 @@ function rendreMatchs() {
     dans aucune source disponible, mais le prix équitable se déduit directement des
     probabilités de marché — c'est exactement ce qu'il faut pour juger l'offre d'un
     opérateur, qui charge en général une marge plus lourde sur ce marché. */
+/* [code, clés des probabilités de marché, clés des probabilités du modèle].
+   Le libellé lisible vient de nomSelection(), qui nomme les équipes. */
 const DC = [
-  ["1X", "domicile ou nul", ["H", "D"], ["pH", "pD"]],
-  ["12", "pas de nul", ["H", "A"], ["pH", "pA"]],
-  ["X2", "nul ou extérieur", ["D", "A"], ["pD", "pA"]]
+  ["1X", ["H", "D"], ["pH", "pD"]],
+  ["12", ["H", "A"], ["pH", "pA"]],
+  ["X2", ["D", "A"], ["pD", "pA"]]
 ];
 function doubleChance(m) {
   if (!m.cons) return "";
@@ -227,7 +230,7 @@ function doubleChance(m) {
     <p style="font-size:12px;color:var(--tx2);margin:0 0 8px">Deux issues couvertes sur trois : ça passe
       beaucoup plus souvent, mais la cote est bien plus basse. Aucune source ne publie les cotes de ce
       marché — compare le prix équitable ci-dessous à celui de ton opérateur.</p>
-    ${DC.map(([code, , kc, km]) => {
+    ${DC.map(([code, kc, km]) => {
       const pm = m.cons[kc[0]] + m.cons[kc[1]];
       const pmod = m[km[0]] + m[km[1]];
       return `<div class="lg">
@@ -554,7 +557,7 @@ function calculCombine() {
     cote *= l.cote;
     pMarche *= l.p;
     const dc = DC.find(x => x[0] === l.sel);
-    pModele *= dc ? (m[dc[3][0]] + m[dc[3][1]])
+    pModele *= dc ? (m[dc[2][0]] + m[dc[2][1]])
       : (l.sel === "1" ? m.pH : l.sel === "N" ? m.pD : m.pA);
   }
   const mOp = Math.max(0, E.set.margeOp / 100);
@@ -682,7 +685,7 @@ function listerAjout() {
     // double chance : prix estimé à partir du prix équitable et de la marge de l'opérateur
     // au-dela de 90 % la double chance ne se joue pas : le prix tombe si bas qu'aucun
     // operateur ne le propose, et le pari n'a plus de sens
-    const dc = m.cons ? DC.map(([code, , kc]) => {
+    const dc = m.cons ? DC.map(([code, kc]) => {
       const p = m.cons[kc[0]] + m.cons[kc[1]];
       const prix = Math.max(1.01, (1 / p) / (1 + E.set.margeOp / 100));
       return [code, p, prix, true];
@@ -1035,6 +1038,7 @@ function rendreReglages() {
   $("#r-infos").innerHTML = JOUR ? `
     ${Object.keys(JOUR.championnats).length} championnats · ${JOUR.matchs.length} rencontres à venir<br>
     Dernière construction : ${new Date(JOUR.genere).toLocaleString("fr-FR")}<br>
+    Version de l'application : <b>${VERSION_APP}</b><br>
     Seuil serveur ${(100 * JOUR.seuil).toFixed(0)} % · issues sous ${(100 * (JOUR.probaMin || 0.1)).toFixed(0)} % écartées · demi-vie ${JOUR.demiVie} jours<br>
     ${HISTO && HISTO.bilan ? `${HISTO.bilan.proposes} signaux suivis, ${HISTO.bilan.regles} réglés` : "suivi des signaux non chargé"}`
     : "Aucune donnée chargée.";
@@ -1100,5 +1104,20 @@ $("#b-reset").onclick = () => {
 };
 document.addEventListener("visibilitychange", () => { if (!document.hidden) recuperer(true); });
 
-if ("serviceWorker" in navigator)
-  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => { }));
+/* Mise à jour automatique. Sans cela, un téléphone peut afficher pendant des jours
+   une version périmée servie par son cache, sans aucun signe visible. */
+if ("serviceWorker" in navigator) {
+  let rechargeFaite = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (rechargeFaite) return;                 // une seule fois, sinon boucle de rechargement
+    rechargeFaite = true;
+    location.reload();
+  });
+  window.addEventListener("load", async () => {
+    try {
+      const reg = await navigator.serviceWorker.register("sw.js");
+      reg.update();                            // vérifie à chaque ouverture
+      setInterval(() => reg.update(), 36e5);   // et une fois par heure si l'appli reste ouverte
+    } catch { }
+  });
+}
