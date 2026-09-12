@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#161c24" media="(prefers-color-scheme:dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme:light)">
+<meta name="description" content="Pronostics football et détection de value bets, mis à jour chaque matin.">
+<title>Pronostics</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icones/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="icones/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pronostics">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="hd">
+    <h1>Pronostics <small id="maj">chargement…</small></h1>
+    <div class="solde"><b id="s-bank">—</b><i id="s-res">bankroll</i></div>
+  </div>
+</header>
+
+<div class="filtres" id="filtres"></div>
+
+<main>
+  <!-- ══════ MATCHS ══════ -->
+  <section id="v-matchs" class="on">
+    <div id="liste-matchs"></div>
+  </section>
+
+  <!-- ══════ SIGNAUX ══════ -->
+  <section id="v-signaux">
+    <div id="bilan"></div>
+    <div id="liste-signaux"></div>
+  </section>
+
+  <!-- ══════ JOURNAL ══════ -->
+  <section id="v-journal">
+    <div class="grid g3" id="j-stats"></div>
+    <div id="j-alerte"></div>
+    <h2>Mes paris</h2>
+    <div id="liste-paris"></div>
+    <button class="btn gh" id="b-ajout" style="margin-top:10px">Ajouter un pari manuellement</button>
+  </section>
+
+  <!-- ══════ RÉGLAGES ══════ -->
+  <section id="v-reglages">
+    <div class="bloc">
+      <h2 style="margin-top:0">Capital et mise</h2>
+      <div class="grid g2">
+        <div><label>Bankroll</label><input type="number" id="r-bank" inputmode="numeric" step="1000"></div>
+        <div><label>Devise</label><input id="r-cur" maxlength="6"></div>
+        <div><label>Fraction de Kelly</label><input type="number" id="r-kf" inputmode="decimal" step="0.05" min="0.05" max="1"></div>
+        <div><label>Mise max (% bankroll)</label><input type="number" id="r-max" inputmode="decimal" step="0.5"></div>
+        <div><label>Marge minimale (%)</label><input type="number" id="r-seuil" inputmode="decimal" step="0.5"></div>
+        <div><label>Perte mensuelle max</label><input type="number" id="r-perte" inputmode="numeric" step="1000"></div>
+      </div>
+      <button class="btn" id="b-save" style="margin-top:12px">Enregistrer</button>
+    </div>
+
+    <div class="bloc">
+      <h2 style="margin-top:0">Championnats affichés</h2>
+      <p class="mut" style="font-size:12.5px;margin:0 0 10px">Aucun sélectionné = tous affichés.</p>
+      <div class="filtres" id="r-champs" style="padding:0;flex-wrap:wrap;overflow:visible;gap:6px"></div>
+    </div>
+
+    <div class="bloc">
+      <h2 style="margin-top:0">Comment ça marche, et ce que ça vaut</h2>
+      <p style="font-size:13px;color:var(--tx2);margin:0 0 10px">
+        Chaque matin, les résultats de la veille sont téléchargés et la force de chaque équipe est ré-estimée
+        (Poisson bivarié Dixon-Coles, pondération temporelle de 180 jours). En parallèle, les cotes de
+        six bookmakers sont comparées : leur consensus, débarrassé de la marge, donne la probabilité de référence.
+      </p>
+      <p style="font-size:13px;color:var(--tx2);margin:0 0 10px">
+        <b>Le modèle ne sert pas à parier.</b> Mesuré sur 6 050 matchs : lui donner le moindre poids face au prix
+        de marché dégrade la prédiction. Il est affiché comme lecture d'un match — buts attendus, score probable —
+        jamais comme déclencheur.
+      </p>
+      <p style="font-size:13px;color:var(--tx2);margin:0">
+        Un écart n'est retenu que si le meilleur prix crédible dépasse la probabilité de marché du seuil choisi.
+        Les cotes s'écartant de plus de 8 % de la médiane des bookmakers sont ignorées (données périmées),
+        et les issues sous 10 % de probabilité aussi : la calibration y est trop mauvaise. Résultat attendu :
+        très peu de signaux, souvent aucun. C'est le fonctionnement normal d'un marché efficace.
+      </p>
+    </div>
+
+    <div class="bloc">
+      <h2 style="margin-top:0">Données</h2>
+      <div id="r-infos" style="font-size:13px;color:var(--tx2)"></div>
+      <div class="ligne" style="margin-top:12px">
+        <button class="btn gh pt" id="b-refresh">Rafraîchir</button>
+        <button class="btn gh pt" id="b-export">Exporter le journal</button>
+      </div>
+      <button class="btn gh pt" id="b-reset" style="margin-top:8px;color:var(--neg)">Tout effacer</button>
+    </div>
+  </section>
+</main>
+
+<div class="voile" id="voile"></div>
+<div class="feuille" id="feuille"><div class="poignee"></div><div id="feuille-c"></div></div>
+
+<nav id="nav"></nav>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

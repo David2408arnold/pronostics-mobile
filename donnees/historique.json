@@ -1,0 +1,13 @@
+{
+ "signaux": [],
+ "bilan": {
+  "proposes": 0,
+  "regles": 0,
+  "gagnes": 0,
+  "mises": 0,
+  "gain": 0,
+  "rendement": null,
+  "ic95": null,
+  "depuis": null
+ }
+}

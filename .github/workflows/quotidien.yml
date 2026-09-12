@@ -1,0 +1,50 @@
+name: Mise a jour quotidienne
+
+on:
+  schedule:
+    # 05:40 UTC — les resultats de la veille et les cotes du jour sont publies
+    - cron: "40 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: donnees
+  cancel-in-progress: false
+
+jobs:
+  construire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Construire les donnees du jour
+        run: node outils/construire.mjs
+
+      - name: Verifier la sortie
+        run: |
+          node -e "
+            const j = require('./donnees/jour.json');
+            if (!j.matchs || !j.matchs.length) { console.error('jour.json ne contient aucun match'); process.exit(1); }
+            const age = (Date.now() - new Date(j.genere)) / 60000;
+            if (age > 30) { console.error('jour.json semble perime'); process.exit(1); }
+            console.log(j.matchs.length + ' matchs, ' + Object.keys(j.championnats).length + ' championnats');
+          "
+
+      - name: Publier
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add donnees
+          if git diff --staged --quiet; then
+            echo "Aucun changement."
+          else
+            git commit -m "Donnees du $(date -u +%Y-%m-%d)"
+            git push
+          fi
