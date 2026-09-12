@@ -10,7 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v19";        // à garder aligné avec VERSION dans sw.js
+const VERSION_APP = "v20";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false, source: "marche" };
 let E = { set: { ...DEFAUT }, journal: [], marges: [] };
 let JOUR = null, HISTO = null, SCORES = null;
@@ -1182,7 +1182,7 @@ function rendreJournal() {
   $("#liste-paris").innerHTML = tri.length ? tri.map(p => {
     const g = p.res === "gagne" ? p.mise * (p.cote - 1) : p.res === "perdu" ? -p.mise : 0;
     const att = !p.res || p.res === "attente";
-    return `<div class="pari">
+    return `<div class="pari" data-ouvrir="${p.id}" style="cursor:pointer">
       <div class="pt"><span class="pn">${esc(p.sel)}</span>
         <b class="${att ? "mut" : g >= 0 ? "pos" : "neg"}">${att ? "en attente" : (g >= 0 ? "+" : "") + arg(g)}</b></div>
       <div class="pd">${esc(p.ev)} · ${p.date ? new Date(p.date).toLocaleDateString("fr-FR") : ""} · cote ${f2(p.cote)} · mise ${arg(p.mise)}
@@ -1192,16 +1192,107 @@ function rendreJournal() {
         <button class="puce" data-sup="${p.id}" style="margin-left:auto;color:var(--neg)">Supprimer</button></div></div>`;
   }).join("") : `<div class="vide">Aucun pari enregistré.</div>`;
 
-  $("#liste-paris").querySelectorAll("button[data-r]").forEach(btn => btn.onclick = () => {
+  $("#liste-paris").querySelectorAll("[data-ouvrir]").forEach(c => c.onclick = e => {
+    if (e.target.closest("button")) return;          // un clic sur une action n'ouvre pas la fiche
+    ouvrirPari(+c.dataset.ouvrir);
+  });
+  $("#liste-paris").querySelectorAll("button[data-r]").forEach(btn => btn.onclick = e => {
+    e.stopPropagation();
     const [id, r] = btn.dataset.r.split("|");
     const p = E.journal.find(x => x.id == id);
     if (p) { p.res = r; p.manuel = true; p.auto = false; sauver(); rendreJournal(); majEntete(); }
   });
-  $("#liste-paris").querySelectorAll("button[data-sup]").forEach(btn => btn.onclick = () => {
+  $("#liste-paris").querySelectorAll("button[data-sup]").forEach(btn => btn.onclick = e => {
+    e.stopPropagation();
     if (!confirm("Supprimer ce pari ?")) return;
     E.journal = E.journal.filter(x => x.id != btn.dataset.sup); sauver(); rendreJournal(); majEntete();
   });
 }
+/** Fiche d'un pari : ce qu'il a coûté, ce qu'il a rapporté, et pour un combiné
+    le détail jambe par jambe — sans quoi on ne sait pas laquelle l'a fait tomber. */
+function ouvrirPari(id) {
+  const p = E.journal.find(x => x.id === id);
+  if (!p) return;
+  const ix = indexResultats();
+  const att = !p.res || p.res === "attente";
+  const gain = p.res === "gagne" ? p.mise * (p.cote - 1) : p.res === "perdu" ? -p.mise : 0;
+  const jambes = p.legs && p.legs.length ? p.legs : (p.ref ? [{ ref: p.ref, code: p.code }] : []);
+
+  /* état de chaque sélection */
+  const lignes = jambes.map(j => {
+    const [d, h, a] = j.ref.split("|");
+    const r = chercherResultat(ix, j.ref);
+    const nom = nomSelection({ h, a }, j.code);
+    if (!r) return { nom, match: `${h} – ${a}`, d, etat: "attente", score: null };
+    const ok = selectionGagnante(j.code, r.hg, r.ag);
+    return { nom, match: `${h} – ${a}`, d, etat: ok ? "gagne" : "perdu", score: `${r.hg}-${r.ag}` };
+  });
+  const perdante = lignes.find(l => l.etat === "perdu");
+
+  /* valeur du pari au moment où il a été pris */
+  const equitable = p.p ? 1 / p.p : null;
+  const marge = p.p ? p.p * p.cote - 1 : null;
+
+  const RES = { attente: "En attente", gagne: "Gagné", perdu: "Perdu", annule: "Annulé" };
+  $("#feuille-c").innerHTML = `
+    <div style="font-size:11.5px;color:var(--tx3);margin-bottom:3px">
+      ${p.date ? new Date(p.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }) : "sans date"}
+      ${p.auto ? ' · <span class="tag t-acc">réglé automatiquement</span>' : ""}</div>
+    <div style="font-size:19px;font-weight:650;letter-spacing:-.02em;margin-bottom:3px">${esc(p.sel)}</div>
+    <div style="font-size:13px;color:var(--tx2);margin-bottom:14px">${esc(p.ev)}</div>
+
+    <div class="grid g3" style="margin-bottom:12px">
+      <div class="stat"><i>Cote prise</i><b>${f2(p.cote)}</b></div>
+      <div class="stat"><i>Mise</i><b style="font-size:14px">${arg(p.mise)}</b></div>
+      <div class="stat"><i>${att ? "Gain possible" : "Résultat"}</i>
+        <b style="font-size:14px" class="${att ? "" : gain >= 0 ? "pos" : "neg"}">
+          ${att ? "+" + arg(p.mise * (p.cote - 1)) : (gain >= 0 ? "+" : "−") + arg(Math.abs(gain))}</b></div>
+    </div>
+
+    ${lignes.length ? `<h2 style="margin-top:0">${lignes.length > 1 ? `Les ${lignes.length} sélections` : "La rencontre"}</h2>
+      ${lignes.map(l => `<div class="lg">
+        <span><b>${esc(l.nom)}</b><br><span style="font-size:11.5px;color:var(--tx3)">${esc(l.match)} · ${libJourPasse(l.d)}</span></span>
+        <span style="text-align:right">
+          ${l.score ? `<b>${l.score}</b><br>` : ""}
+          <span class="tag ${l.etat === "gagne" ? "t-pos" : l.etat === "perdu" ? "t-neg" : "t-mut"}">
+            ${l.etat === "gagne" ? "gagnée" : l.etat === "perdu" ? "perdue" : "en attente"}</span></span></div>`).join("")}
+      ${lignes.length > 1 && perdante ? `<div class="note bad" style="margin-top:10px">
+        Le combiné est tombé sur <b>${esc(perdante.nom)}</b> (${esc(perdante.match)} ${esc(perdante.score || "")}).
+        Toutes les autres sélections ne servent à rien dès qu'une seule échoue.</div>` : ""}`
+      : `<div class="note">Ce pari a été saisi à la main, sans rattachement à un match connu :
+         il ne peut pas se régler automatiquement.</div>`}
+
+    ${equitable ? `<h2>Ce que valait ce pari</h2>
+      <div class="lg"><span>Probabilité retenue</span><b>${pc(p.p, 1)}</b></div>
+      <div class="lg"><span>Prix équitable</span><b>${f2(equitable)}</b></div>
+      <div class="lg"><span>Marge à la prise</span>
+        <b class="${marge >= 0 ? "pos" : "neg"}">${sg(marge)}</b></div>` : ""}
+    ${typeof p.clv === "number" ? `<div class="lg"><span>CLV<br>
+      <span style="font-size:11.5px;color:var(--tx3)">écart avec le prix de clôture</span></span>
+      <b class="${p.clv >= 0 ? "pos" : "neg"}">${sg(p.clv)}</b></div>` : ""}
+
+    <h2>Résultat</h2>
+    <div class="pa">${Object.keys(RES).map(k =>
+      `<button class="puce ${(p.res || "attente") === k ? "on" : ""}" data-fr="${k}">${RES[k]}</button>`).join("")}</div>
+    ${p.manuel ? `<p style="font-size:11.5px;color:var(--tx3);margin:8px 0 0">
+      Tu as fixé ce résultat toi-même : l'application ne le réécrira plus.</p>` : ""}
+
+    <button class="btn gh" style="margin-top:14px" id="pf-suppr">Supprimer ce pari</button>
+    <button class="btn gh" style="margin-top:9px" id="pf-fermer">Fermer</button>`;
+
+  $("#voile").classList.add("on"); $("#feuille").classList.add("on");
+  $("#pf-fermer").onclick = fermer;
+  $("#pf-suppr").onclick = () => {
+    if (!confirm("Supprimer ce pari ?")) return;
+    E.journal = E.journal.filter(x => x.id !== id);
+    sauver(); fermer(); rendreJournal(); majEntete();
+  };
+  $("#feuille-c").querySelectorAll("[data-fr]").forEach(b => b.onclick = () => {
+    p.res = b.dataset.fr; p.manuel = true; p.auto = false;
+    sauver(); ouvrirPari(id); rendreJournal(); majEntete();
+  });
+}
+
 function formulairePari(pre) {
   const v = pre || { ev: "", sel: "", cote: "", m: "", p: null, d: aujourdhui() };
   $("#feuille-c").innerHTML = `
