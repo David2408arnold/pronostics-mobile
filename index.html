@@ -17,6 +17,7 @@
 </head>
 <body>
 
+<div class="haut">
 <header>
   <div class="hd">
     <h1>Pronostics <small id="maj">chargement…</small></h1>
@@ -31,6 +32,7 @@
 </div>
 
 <div class="filtres" id="filtres"></div>
+</div>
 
 <main>
   <!-- ══════ MATCHS ══════ -->
@@ -94,6 +96,15 @@
         <div><label>Marge de ton opérateur (%)</label><input type="number" id="r-margeop" inputmode="decimal" step="0.5"></div>
       </div>
       <button class="btn" id="b-save" style="margin-top:12px">Enregistrer</button>
+    </div>
+
+    <div class="bloc">
+      <h2 style="margin-top:0">Pronostics</h2>
+      <div class="filtres" id="r-dc" style="padding:0;gap:6px;overflow:visible"></div>
+      <p class="mut" style="font-size:12px;margin:10px 0 0">
+        Activée, chaque match affiche aussi la double chance conseillée : elle passe trois fois
+        sur quatre au lieu d'une sur deux, mais l'espérance reste la même. Elle change le rythme
+        des gains, pas leur total.</p>
     </div>
 
     <div class="bloc">

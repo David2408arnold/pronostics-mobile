@@ -10,8 +10,8 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v11";        // à garder aligné avec VERSION dans sw.js
-const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8 };
+const VERSION_APP = "v12";        // à garder aligné avec VERSION dans sw.js
+const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null, SCORES = null;
 let vue = "matchs", filtreJour = "tous", recherche = "";
@@ -208,6 +208,7 @@ function rendreMatchs() {
       ${m.score ? `<div style="font-size:11.5px;color:var(--tx3);margin:-2px 0 7px">
         Score pronostiqué <b style="color:var(--tx2)">${esc(m.score)}</b>
         · buts attendus ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</div>` : ""}
+      ${E.set.avecDC ? conseilDC(m) : ""}
       <div class="cotes">${cell("1", m.pH, m.cH)}${cell("Nul", m.pD, m.cD)}${cell("2", m.pA, m.cA)}</div>
     </div>`;
   });
@@ -516,6 +517,20 @@ function rendreSignaux() {
    l'application l'affiche au lieu de le laisser dans l'ombre. */
 
 const TAILLES = [2, 3, 4, 5, 8, 10];
+
+/** Double chance conseillée : celle qui écarte l'issue la moins probable selon le marché. */
+function conseilDC(m) {
+  if (!m.cons) return "";
+  const p = [m.cons.H, m.cons.D, m.cons.A];
+  const moins = p.indexOf(Math.min(...p));
+  const code = ["X2", "12", "1X"][moins];         // on retire respectivement 1, N puis 2
+  const proba = 1 - p[moins];
+  if (proba > 0.92) return "";                    // trop probable : aucun prix decent n'existe
+  return `<div style="font-size:11.5px;margin:0 0 7px;padding:6px 9px;border-radius:7px;
+      background:var(--acc-w);color:var(--acc)">
+    Double chance · <b>${esc(nomSelection(m, code))}</b> — ${pc(proba, 0)},
+    prix équitable ${f2(1 / proba)}</div>`;
+}
 
 /** Libellé lisible d'une sélection, y compris les doubles chances. */
 function nomSelection(m, sel) {
@@ -920,6 +935,30 @@ function rendreJournal() {
     <div class="stat"><i>Paris réglés</i><b>${b.n}${b.attente ? ` <span class="mut" style="font-size:11px">+${b.attente}</span>` : ""}</b></div>
     <div class="stat"><i>Résultat</i><b class="${b.gain >= 0 ? "pos" : "neg"}" style="font-size:15px">${b.gain >= 0 ? "+" : ""}${arg(b.gain)}</b></div>
     <div class="stat"><i>Rendement</i><b class="${b.rend >= 0 ? "pos" : "neg"}">${b.n ? (100 * b.rend).toFixed(1) + " %" : "—"}</b></div>`;
+  // Ce que la marge explique, et ce qui releve de la chance : la seule decomposition
+  // qui dise ou part reellement l'argent.
+  if (b.mises > 0) {
+    const marge = Math.max(0, E.set.margeOp / 100);
+    const coutMarge = b.mises * (1 - 1 / (1 + marge));
+    const chance = b.gain + coutMarge;
+    $("#j-stats").insertAdjacentHTML("afterend", `
+      <div class="bloc" style="margin-top:11px">
+        <h2 style="margin-top:0">D'où vient ton résultat</h2>
+        <div class="lg"><span>Total misé</span><b>${arg(b.mises)}</b></div>
+        <div class="lg"><span>Coût de la marge de ton opérateur<br>
+          <span style="font-size:11.5px;color:var(--tx3)">${E.set.margeOp} % par pari, réglable</span></span>
+          <b class="neg">−${arg(coutMarge)}</b></div>
+        <div class="lg"><span>Part de la chance<br>
+          <span style="font-size:11.5px;color:var(--tx3)">écart entre ton résultat et cette attente</span></span>
+          <b class="${chance >= 0 ? "pos" : "neg"}">${chance >= 0 ? "+" : "−"}${arg(Math.abs(chance))}</b></div>
+        <div class="lg"><span><b>Résultat net</b></span>
+          <b class="${b.gain >= 0 ? "pos" : "neg"}">${b.gain >= 0 ? "+" : "−"}${arg(Math.abs(b.gain))}</b></div>
+        <p style="font-size:12px;color:var(--tx2);margin:10px 0 0">
+          La première ligne est certaine et se répète à chaque pari. La seconde s'annule à la longue.
+          Pour perdre moins il n'y a donc qu'un levier durable : baisser la marge que tu paies, en
+          comparant les cotes de ton opérateur au prix équitable.</p>
+      </div>`);
+  }
   const pm = perteDuMois();
   $("#j-alerte").innerHTML = pm >= E.set.perteMax
     ? `<div class="note bad"><b>Limite mensuelle atteinte.</b> ${arg(pm)} perdus ce mois-ci sur un plafond de ${arg(E.set.perteMax)}. Nouveaux paris bloqués.</div>`
@@ -1086,6 +1125,11 @@ function rendreReglages() {
     const c = b.dataset.c;
     E.set.champs = E.set.champs.includes(c) ? E.set.champs.filter(x => x !== c) : [...E.set.champs, c];
     sauver(); rendreReglages();
+  });
+  $("#r-dc").innerHTML = [[false, "Sans double chance"], [true, "Avec double chance"]]
+    .map(([v, lib]) => `<button class="puce ${E.set.avecDC === v ? "on" : ""}" data-dc="${v}">${lib}</button>`).join("");
+  $("#r-dc").querySelectorAll("button").forEach(b => b.onclick = () => {
+    E.set.avecDC = b.dataset.dc === "true"; sauver(); rendreReglages();
   });
   $("#r-infos").innerHTML = JOUR ? `
     ${Object.keys(JOUR.championnats).length} championnats · ${JOUR.matchs.length} rencontres à venir<br>

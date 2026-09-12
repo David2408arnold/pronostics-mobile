@@ -334,7 +334,18 @@ const jour = {
   classement,
   matchs
 };
-writeFileSync(join(DOSSIER, "jour.json"), JSON.stringify(jour), "utf8");
+/* Le champ « genere » change a chaque execution : ecrire sans regarder le reste
+   produirait un commit toutes les 3 heures pour rien. On compare donc le contenu
+   utile, horodatage exclu. */
+const cheminJour = join(DOSSIER, "jour.json");
+const sansHorodatage = o => { const c = { ...o }; delete c.genere; return JSON.stringify(c); };
+let jourIdentique = false;
+if (existsSync(cheminJour)) {
+  try { jourIdentique = sansHorodatage(JSON.parse(readFileSync(cheminJour, "utf8"))) === sansHorodatage(jour); }
+  catch { }
+}
+if (jourIdentique) console.log("   jour.json inchange, pas de reecriture");
+else writeFileSync(cheminJour, JSON.stringify(jour), "utf8");
 writeFileSync(join(DOSSIER, "forces.json"), JSON.stringify(forces), "utf8");
 writeFileSync(cheminHisto, JSON.stringify(histo, null, 1), "utf8");
 

@@ -2,8 +2,9 @@ name: Mise a jour quotidienne
 
 on:
   schedule:
-    # 05:40 UTC — les resultats de la veille et les cotes du jour sont publies
-    - cron: "40 5 * * *"
+    # Toutes les 3 heures : football-data n est pas temps reel, mais des qu il publie
+    # un score la prochaine execution le reprend, au lieu d attendre le lendemain.
+    - cron: "40 */3 * * *"
   workflow_dispatch: {}
 
 permissions:
