@@ -10,8 +10,8 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v18";        // à garder aligné avec VERSION dans sw.js
-const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false };
+const VERSION_APP = "v19";        // à garder aligné avec VERSION dans sw.js
+const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false, source: "marche" };
 let E = { set: { ...DEFAUT }, journal: [], marges: [] };
 let JOUR = null, HISTO = null, SCORES = null;
 let vue = "matchs", filtreJour = "tous", recherche = "";
@@ -198,12 +198,14 @@ function rendreMatchs() {
   }
   const s = E.set.seuil / 100;
   let html = recherche ? enteteRecherche(ms)
-    : `<div class="note info" style="margin-bottom:12px">Sous chaque cote : la probabilité estimée par le modèle.
-       Touche un match pour le détail et la comparaison avec le marché.</div>`;
+    : `<div class="note info" style="margin-bottom:12px">Sous chaque cote : la probabilité
+       ${E.set.source === "marche" ? "du <b>marché</b>, le meilleur pronostic disponible"
+         : "du <b>modèle</b>"}. Touche un match pour voir les deux côte à côte.</div>`;
   let jourCourant = "";
   ms.forEach(m => {
     if (m.d !== jourCourant) { jourCourant = m.d; html += `<h2>${libJour(m.d)}</h2>`; }
     const nSig = m.fiable ? m.signaux.filter(x => x.marge >= s).length : 0;
+    const marche = E.set.source === "marche" && m.cons;
     const cell = (lab, p, c) => `<div class="cote"><span class="l">${lab}</span>
         <b>${c ? f2(c) : "—"}</b><span class="v">${pc(p)}</span></div>`;
     html += `<div class="match" data-i="${JOUR.matchs.indexOf(m)}">
@@ -217,7 +219,7 @@ function rendreMatchs() {
         Score pronostiqué <b style="color:var(--tx2)">${esc(m.score)}</b>
         · buts attendus ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</div>` : ""}
       ${E.set.avecDC ? conseilDC(m) : ""}
-      <div class="cotes">${cell("1", m.pH, m.cH)}${cell("Nul", m.pD, m.cD)}${cell("2", m.pA, m.cA)}</div>
+      <div class="cotes">${cell("1", marche ? m.cons.H : m.pH, m.cH)}${cell("Nul", marche ? m.cons.D : m.pD, m.cD)}${cell("2", marche ? m.cons.A : m.pA, m.cA)}</div>
     </div>`;
   });
   $("#liste-matchs").innerHTML = html;
@@ -1350,6 +1352,11 @@ function rendreReglages() {
     const c = b.dataset.c;
     E.set.champs = E.set.champs.includes(c) ? E.set.champs.filter(x => x !== c) : [...E.set.champs, c];
     sauver(); rendreReglages();
+  });
+  $("#r-source").innerHTML = [["marche", "Marché (recommandé)"], ["modele", "Modèle"]]
+    .map(([v, lib]) => `<button class="puce ${E.set.source === v ? "on" : ""}" data-src="${v}">${lib}</button>`).join("");
+  $("#r-source").querySelectorAll("button").forEach(b => b.onclick = () => {
+    E.set.source = b.dataset.src; sauver(); rendreReglages();
   });
   $("#r-dc").innerHTML = [[false, "Sans double chance"], [true, "Avec double chance"]]
     .map(([v, lib]) => `<button class="puce ${E.set.avecDC === v ? "on" : ""}" data-dc="${v}">${lib}</button>`).join("");
