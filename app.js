@@ -227,11 +227,12 @@ function doubleChance(m) {
     <p style="font-size:12px;color:var(--tx2);margin:0 0 8px">Deux issues couvertes sur trois : ça passe
       beaucoup plus souvent, mais la cote est bien plus basse. Aucune source ne publie les cotes de ce
       marché — compare le prix équitable ci-dessous à celui de ton opérateur.</p>
-    ${DC.map(([code, libelle, kc, km]) => {
+    ${DC.map(([code, , kc, km]) => {
       const pm = m.cons[kc[0]] + m.cons[kc[1]];
       const pmod = m[km[0]] + m[km[1]];
       return `<div class="lg">
-        <span><b>${code}</b> · ${libelle}<br><span style="font-size:11.5px;color:var(--tx3)">
+        <span><b>${esc(nomSelection(m, code))}</b> <span class="tag t-mut">${code}</span>
+          <br><span style="font-size:11.5px;color:var(--tx3)">
           marché ${pc(pm, 1)} · modèle ${pc(pmod, 1)}</span></span>
         <span style="text-align:right"><b>${f2(1 / pm)}</b><br>
           <span style="font-size:11px;color:var(--tx3)">${pm > 0.9 ? "rarement proposé" : "prix équitable"}</span></span></div>`;
@@ -519,7 +520,7 @@ function nomSelection(m, sel) {
   if (sel === "1X") return `${m.h} ou nul`;
   if (sel === "12") return `${m.h} ou ${m.a}`;
   if (sel === "X2") return `Nul ou ${m.a}`;
-  return sel;
+  return sel;                                  // +2,5 buts / -2,5 buts passent tels quels
 }
 
 /** Issue la plus probable d'un match selon le marché, avec son meilleur prix. */
@@ -690,7 +691,7 @@ function listerAjout() {
       <div style="font-size:13.5px;font-weight:600">${esc(m.h)} – ${esc(m.a)}</div>
       <div style="font-size:11.5px;color:var(--tx3);margin-bottom:5px">${esc(m.nom)} · ${libJour(m.d)}</div>
       <div class="pa">${[...opts, ...dc].map(([sel, p, co, est]) =>
-        `<button class="puce" data-add="${i}|${sel}|${p}|${co}|${est ? 1 : 0}">${sel} · ${f2(co)}${est ? " ~" : ""}</button>`).join("")}</div></div>`;
+        `<button class="puce" data-add="${i}|${sel}|${p}|${co}|${est ? 1 : 0}">${esc(nomSelection(m, sel))} · ${f2(co)}${est ? " ~" : ""}</button>`).join("")}</div></div>`;
   }).join("") : '<p class="mut" style="font-size:12.5px;margin:0">Aucun match trouvé.</p>';
   boite.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
     const [i, sel, p, co, est] = b.dataset.add.split("|");
@@ -965,7 +966,7 @@ function formulairePari(pre) {
         <p style="font-size:12px;color:var(--tx2);margin:0 0 9px">Choisis ta sélection, puis remplace la cote
           par celle réellement proposée par ton opérateur.</p>
         <div class="pa">${marches.map(([lab, c], i) =>
-          `<button class="puce" data-mk="${i}">${esc(lab)} · ${f2(c)}</button>`).join("")}</div>
+          `<button class="puce" data-mk="${i}">${esc(nomSelection(m, lab))} · ${f2(c)}</button>`).join("")}</div>
         <button class="btn gh pt" style="margin-top:10px" id="p-autre">Changer de match</button>
       </div>`;
     $("#p-choisi").querySelectorAll("[data-mk]").forEach(b => b.onclick = () => {
