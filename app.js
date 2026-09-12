@@ -668,10 +668,8 @@ function rendreScores() {
       </div>
       <div class="lg"><span>Erreur moyenne sur le nombre de buts</span><b>${B.erreurButs} but${B.erreurButs > 1 ? "s" : ""}</b></div>
       <div class="lg"><span>Erreur moyenne sur l'écart au score</span><b>${B.erreurEcart} but${B.erreurEcart > 1 ? "s" : ""}</b></div>
+      ${blocDivergence()}
       <p style="font-size:12px;color:var(--tx2);margin:11px 0 0">
-        ${tauxMarche != null && tauxMarche > tauxModele
-          ? `Le marché désigne le bon vainqueur ${((tauxMarche - tauxModele) * 100).toFixed(1)} points plus souvent que le modèle. C'est la mesure, pas une opinion.`
-          : `Le modèle fait jeu égal avec le marché sur cet échantillon — encore trop court pour en conclure quoi que ce soit.`}
         Un score exact tombe environ une fois sur ${Math.round(B.n / Math.max(1, B.exact))}.
       </p>
       ${SCORES.matchs.some(x => x.reconstruit) ? `<p style="font-size:11.5px;color:var(--tx3);margin:9px 0 0">
@@ -702,6 +700,42 @@ function rendreScores() {
         </div></div>`).join("");
   }).join("") || `<div class="vide">Aucun match pour les championnats sélectionnés.</div>`;
 }
+/** Modèle et marché désignent le même favori la plupart du temps. Comparer leurs
+    taux bruts mélange donc des matchs sur lesquels ils sont d'accord. Le seul
+    comparatif qui a du sens porte sur les rencontres où ils divergent — c'est le
+    principe du test de McNemar, sur paires discordantes. */
+function blocDivergence() {
+  const ms = (SCORES.matchs || []).filter(x => x.fiable && x.okMarche !== null);
+  if (ms.length < 30) return "";
+  const divergents = ms.filter(x => x.issuePrevue !== x.issueMarche);
+  const modeleSeul = divergents.filter(x => x.okIssue).length;
+  const marcheSeul = divergents.filter(x => x.okMarche).length;
+  const paires = modeleSeul + marcheSeul;
+  if (!paires) return "";
+  const chi = Math.pow(Math.abs(modeleSeul - marcheSeul) - 1, 2) / paires;
+  const p = Math.exp(-chi / 2);                     // approximation suffisante ici
+  const significatif = p < 0.05;
+  const gagnant = marcheSeul > modeleSeul ? "marché" : "modèle";
+  return `
+    <h2 style="margin-top:16px">Là où ils ne sont pas d'accord</h2>
+    <p style="font-size:12px;color:var(--tx2);margin:0 0 9px">
+      Sur ${ms.length} matchs, modèle et marché désignent le même favori
+      ${ms.length - divergents.length} fois (${pc((ms.length - divergents.length) / ms.length, 0)}).
+      Comparer les taux bruts mélange donc surtout des matchs identiques. Le vrai comparatif
+      porte sur les ${divergents.length} rencontres où ils divergent :</p>
+    <div class="lg"><span>Le marché avait raison</span><b class="pos">${marcheSeul} fois</b></div>
+    <div class="lg"><span>Le modèle avait raison</span><b class="${modeleSeul >= marcheSeul ? "pos" : "neg"}">${modeleSeul} fois</b></div>
+    <div class="lg"><span>Ni l'un ni l'autre</span><b class="mut">${divergents.length - modeleSeul - marcheSeul} fois</b></div>
+    <div class="note ${significatif ? "" : "info"}" style="margin-top:10px">
+      ${significatif
+        ? `<b>Écart significatif</b> en faveur du ${gagnant} (test de McNemar, p ≈ ${p.toFixed(3)}).`
+        : `<b>Pas encore concluant.</b> L'avantage apparent du ${gagnant} pourrait venir du hasard
+           sur un échantillon de cette taille (test de McNemar, p ≈ ${p.toFixed(3)} ; il faudrait
+           p sous 0,05). La mesure décisive est ailleurs : sur 6 050 matchs, le modèle prédit
+           moins bien que le marché de façon nette — voir l'onglet Réglages.`}
+    </div>`;
+}
+
 function libJourPasse(d) {
   if (d === aujourdhui()) return "Aujourd'hui";
   if (d === new Date(Date.now() - 864e5).toISOString().slice(0, 10)) return "Hier";
