@@ -73,7 +73,17 @@ de **référence de prix** : ils permettent de juger si la cote de ton propre op
 correcte. Aucun d'eux ne propose le mobile money en Côte d'Ivoire, et la plupart n'acceptent
 pas les comptes ivoiriens.
 
-L'application ne classe donc pas les opérateurs par fiabilité de retrait : ce serait une
+**Pour tous les autres — Betclic, 1xBet, Akabet, Sportcash, Premier Bet…** — aucune source
+ne publie leurs cotes de façon exploitable. Le détail de chaque match contient donc un
+**comparateur** : tu saisis les trois cotes affichées par ton opérateur, et l'application
+calcule sa marge réelle sur ce match, la compare au meilleur prix des six books, et indique
+l'issue la moins désavantageuse. Ça fonctionne avec n'importe quel bookmaker, puisque le
+calcul ne dépend que des cotes.
+
+Ordre de grandeur : 5–7 % de marge est correct, 7–12 % est cher, au-delà de 12 % aucun
+pronostic ne rattrape le prix payé.
+
+L'application ne classe pas les opérateurs par fiabilité de retrait : ce serait une
 information que je n'ai pas les moyens de vérifier, qui change souvent, et se tromper dessus
 coûte de l'argent réel. Pour choisir un opérateur, la seule méthode fiable reste :
 

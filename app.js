@@ -10,7 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [] };
+const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "" };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null;
 let vue = "matchs", filtreJour = "tous", recherche = "";
@@ -251,6 +251,77 @@ function tableauBooks(m) {
       * cote s'écartant de plus de 8 % de la médiane : écartée du calcul, probablement périmée.</p>` : ""}`;
 }
 
+/** Comparateur : l'utilisateur saisit les cotes de SON opérateur (Betclic, 1xBet, Akabet,
+    Sportcash… peu importe, aucun n'est dans les données) et voit ce que cet opérateur
+    lui prend réellement sur ce match. */
+function comparateur(m) {
+  if (!m.cons) return "";
+  return `<h2>Comparer avec ton opérateur</h2>
+    <p style="font-size:12px;color:var(--tx2);margin:0 0 9px">Saisis les trois cotes affichées par ton
+      bookmaker. Ça marche avec n'importe lequel — le calcul ne dépend que des cotes.</p>
+    <input id="cmp-nom" placeholder="Nom de l'opérateur" value="${esc(E.set.operateur || "")}"
+           style="margin-bottom:8px" autocomplete="off">
+    <div class="ligne">
+      <div style="flex:1"><label>1</label><input type="number" inputmode="decimal" step="0.01" class="cmp" id="cmp0"></div>
+      <div style="flex:1"><label>Nul</label><input type="number" inputmode="decimal" step="0.01" class="cmp" id="cmp1"></div>
+      <div style="flex:1"><label>2</label><input type="number" inputmode="decimal" step="0.01" class="cmp" id="cmp2"></div>
+    </div>
+    <div id="cmp-out" style="margin-top:10px"></div>`;
+}
+function brancherComparateur(m) {
+  if (!m.cons || !$("#cmp0")) return;
+  const nom = $("#cmp-nom");
+  nom.addEventListener("change", () => { E.set.operateur = nom.value.trim(); sauver(); });
+  const calcule = () => {
+    const o = [0, 1, 2].map(i => +$("#cmp" + i).value);
+    const boite = $("#cmp-out");
+    const valides = o.filter(x => x > 1).length;
+    if (valides < 3) {
+      boite.innerHTML = `<p class="mut" style="font-size:12px;margin:0">Renseigne les trois cotes pour obtenir la marge.</p>`;
+      return;
+    }
+    const somme = o.reduce((a, c) => a + 1 / c, 0);
+    const margeOp = somme - 1;                       // ce que l'opérateur prélève
+    const refBest = [m.cH, m.cD, m.cA];
+    const margeRef = refBest.every(x => x) ? refBest.reduce((a, c) => a + 1 / c, 0) - 1 : null;
+    const p = [m.cons.H, m.cons.D, m.cons.A];
+    const labels = ["1", "Nul", "2"];
+    const ecarts = o.map((c, i) => margeDe(p[i], c));
+    const meilleur = ecarts.indexOf(Math.max(...ecarts));
+    // une seule échelle pilote l'étiquette ET la conclusion, pour qu'elles ne se contredisent pas
+    const bande = margeOp <= 0.07 ? 0 : margeOp <= 0.12 ? 1 : 2;
+    const etiquette = [["t-pos", "correct"], ["t-warn", "cher"], ["t-neg", "très cher"]][bande];
+    const coutPour100 = (100 * margeOp / (1 + margeOp)).toFixed(0);
+    const conclusion = [
+      `Marge comparable aux grands opérateurs européens.`,
+      `Sur 100 ${E.set.cur} misés chez cet opérateur, il t'en coûte environ ${coutPour100} en moyenne, avant même de pronostiquer.`,
+      `Marge très élevée : sur 100 ${E.set.cur} misés, il t'en coûte environ ${coutPour100} en moyenne. À ce niveau, aucun pronostic ne rattrape le prix payé.`
+    ][bande];
+    boite.innerHTML = `
+      <div class="fiche">
+        <div class="ft"><span class="fn">${esc(nom.value.trim() || "Ton opérateur")}</span>
+          <span class="tag ${etiquette[0]}">${etiquette[1]}</span></div>
+        <div class="grid g2" style="margin-bottom:10px">
+          <div class="stat"><i>Sa marge sur ce match</i><b class="${margeOp > 0.12 ? "neg" : ""}">${(100 * margeOp).toFixed(1)} %</b></div>
+          <div class="stat"><i>Meilleur prix des 6 books</i><b>${margeRef == null ? "—" : (100 * margeRef).toFixed(1) + " %"}</b></div>
+        </div>
+        ${labels.map((l, i) => `<div class="lg"><span>${l} à ${f2(o[i])}
+            <br><span style="font-size:11.5px;color:var(--tx3)">prix équitable ${f2(1 / p[i])}</span></span>
+          <span class="tag ${ecarts[i] >= 0 ? "t-pos" : ecarts[i] > -0.05 ? "t-mut" : "t-neg"}">${sg(ecarts[i])}</span></div>`).join("")}
+        <p style="font-size:12px;color:var(--tx2);margin:10px 0 0">
+          ${conclusion}
+          Son prix le moins désavantageux sur ce match est <b>${labels[meilleur]}</b>.
+        </p>
+        <p style="font-size:11.5px;color:var(--tx3);margin:8px 0 0">
+          La colonne de droite compare à la marge obtenue en prenant la meilleure des six cotes
+          européennes, pas à celle d'un seul bookmaker — c'est volontairement le point de comparaison
+          le plus exigeant.</p>
+      </div>`;
+  };
+  [0, 1, 2].forEach(i => $("#cmp" + i).addEventListener("input", calcule));
+  calcule();
+}
+
 /** En-tête affiché pendant une recherche : fiche de l'équipe trouvée puis nombre de résultats. */
 function enteteRecherche(ms) {
   const eqs = equipesTrouvees();
@@ -312,6 +383,7 @@ function ouvrirMatch(i) {
           ${e == null ? '<span class="tag t-mut">—</span>' : `<span class="tag ${ok ? "t-pos" : "t-mut"}">${sg(e)}</span>`}</span></div>`;
     }).join("")}
     ${tableauBooks(m)}
+    ${comparateur(m)}
     ${m.cons ? `<h2>Où le modèle diverge du marché</h2>
       <p style="font-size:12px;color:var(--tx2);margin:0 0 8px">Écart en points de pourcentage. Un gros écart ne signale pas
         une occasion : la mesure montre que dans ce face-à-face, c'est le modèle qui se trompe.</p>
@@ -326,6 +398,7 @@ function ouvrirMatch(i) {
     <button class="btn gh" style="margin-top:10px" id="b-fermer">Fermer</button>`;
   $("#voile").classList.add("on"); $("#feuille").classList.add("on");
   $("#b-fermer").onclick = fermer;
+  brancherComparateur(m);
   const bp = $("#b-parier");
   if (bp) bp.onclick = () => {
     const x = retenus[0];
