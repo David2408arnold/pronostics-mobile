@@ -65,6 +65,24 @@ Betfair Exchange dont les cotes sont brutes de commission.
 comportement correct face à un marché efficace. Le jour de la mise en service, sur 141 matchs
 exploitables, le meilleur écart disponible était de 1,6 % — sous le seuil.
 
+## Onglet Scores : le pronostic confronté au réel
+
+Chaque pronostic est archivé **avant** le match dans `donnees/pronostics.json` — le premier
+pronostic fait foi, le réécrire la veille donnerait une précision flatteuse et fausse. Dès que
+le résultat paraît, la ligne bascule dans `donnees/resultats.json` avec le score réel.
+
+Mesure sur les 283 matchs jugés à la mise en service :
+
+| | Modèle | Marché |
+|---|---|---|
+| Issue correcte | 50,9 % | **55,1 %** |
+| Score exact | 11,3 % | — |
+| Erreur moyenne sur le total de buts | 1,30 | — |
+
+`outils/retrospectif.mjs [jours]` reconstruit les journées passées en n'ajustant le modèle que
+sur les matchs antérieurs à chaque rencontre. Ces lignes portent la mention « reconstruit » :
+elles sont honnêtes méthodologiquement, mais n'ont pas été publiées à l'avance.
+
 ## Les six bookmakers affichés
 
 Bet365, Betfair Sportsbook, BetVictor, bwin, Paddy Power et Sky Bet. Ce sont des opérateurs

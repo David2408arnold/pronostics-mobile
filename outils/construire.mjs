@@ -228,6 +228,93 @@ histo.bilan = {
 console.log(`   ${nouveaux} nouveaux signaux, ${regles} réglés, ${clos.length} réglés au total`);
 if (clos.length) console.log(`   rendement cumulé : ${(100 * gain / clos.length).toFixed(2)} % sur ${clos.length} paris`);
 
+/* ─────────── 4 bis. archivage des pronostics et confrontation aux scores ─────────── */
+console.log("6. Pronostics et scores reels");
+const cheminPron = join(DOSSIER, "pronostics.json");
+const cheminRes = join(DOSSIER, "resultats.json");
+let pron = { attente: {} };
+if (existsSync(cheminPron)) { try { pron = JSON.parse(readFileSync(cheminPron, "utf8")); } catch { } }
+let res = { maj: null, bilan: null, matchs: [] };
+if (existsSync(cheminRes)) { try { res = JSON.parse(readFileSync(cheminRes, "utf8")); } catch { } }
+
+/* a) on enregistre le pronostic de chaque match a venir, une seule fois.
+      Le premier pronostic fait foi : le reecrire la veille du match donnerait
+      une precision flatteuse mais fausse. */
+let archives = 0;
+for (const m of matchs) {
+  const cle = `${m.d}|${m.h}|${m.a}`;
+  if (pron.attente[cle]) continue;
+  pron.attente[cle] = {
+    d: m.d, div: m.div, nom: m.nom, heure: m.heure, h: m.h, a: m.a,
+    score: m.score, lH: m.lH, lA: m.lA,
+    pH: m.pH, pD: m.pD, pA: m.pA,
+    cons: m.cons, fiable: m.fiable, pose: new Date().toISOString().slice(0, 10)
+  };
+  archives++;
+}
+
+/* b) tout pronostic dont le resultat est connu rejoint l'historique des scores */
+const dejaVus = new Set(res.matchs.map(x => `${x.d}|${x.h}|${x.a}`));
+let confrontes = 0;
+for (const [cle, p] of Object.entries(pron.attente)) {
+  const vrai = resIdx.get(cle);
+  if (!vrai) continue;
+  delete pron.attente[cle];
+  if (dejaVus.has(cle)) continue;
+  const issueReelle = vrai.hg > vrai.ag ? "1" : vrai.hg === vrai.ag ? "N" : "2";
+  const probas = [["1", p.pH], ["N", p.pD], ["2", p.pA]];
+  const issuePrevue = probas.reduce((x, y) => y[1] > x[1] ? y : x)[0];
+  const consProbas = p.cons ? [["1", p.cons.H], ["N", p.cons.D], ["2", p.cons.A]] : null;
+  const issueMarche = consProbas ? consProbas.reduce((x, y) => y[1] > x[1] ? y : x)[0] : null;
+  res.matchs.push({
+    d: p.d, div: p.div, nom: p.nom, h: p.h, a: p.a, fiable: p.fiable,
+    prevu: p.score, reel: `${vrai.hg}-${vrai.ag}`,
+    lH: p.lH, lA: p.lA, butsReels: vrai.hg + vrai.ag,
+    issuePrevue, issueReelle, issueMarche,
+    pIssueReelle: r3(probas.find(x => x[0] === issueReelle)[1]),
+    exact: p.score === `${vrai.hg}-${vrai.ag}`,
+    okIssue: issuePrevue === issueReelle,
+    okMarche: issueMarche ? issueMarche === issueReelle : null,
+    reconstruit: !!p.reconstruit
+  });
+  dejaVus.add(cle);
+  confrontes++;
+}
+
+/* c) on garde les 400 derniers matchs, le bilan cumule reste complet */
+res.matchs.sort((x, y) => (y.d + y.h).localeCompare(x.d + x.h));
+res.matchs = res.matchs.slice(0, 400);
+
+const juges = res.matchs.filter(x => x.fiable);
+const compte = (f) => juges.filter(f).length;
+const avecMarche = juges.filter(x => x.okMarche !== null);
+res.bilan = {
+  n: juges.length,
+  exact: compte(x => x.exact),
+  okIssue: compte(x => x.okIssue),
+  okMarche: avecMarche.filter(x => x.okMarche).length,
+  nMarche: avecMarche.length,
+  erreurButs: juges.length
+    ? r3(juges.reduce((t, x) => t + Math.abs((x.lH + x.lA) - x.butsReels), 0) / juges.length)
+    : null,
+  erreurEcart: juges.length
+    ? r3(juges.reduce((t, x) => {
+        const [ph, pa] = x.prevu.split("-").map(Number);
+        const [rh, ra] = x.reel.split("-").map(Number);
+        return t + Math.abs((ph - pa) - (rh - ra));
+      }, 0) / juges.length)
+    : null,
+  depuis: juges.length ? juges[juges.length - 1].d : null
+};
+res.maj = new Date().toISOString();
+
+writeFileSync(cheminPron, JSON.stringify(pron), "utf8");
+writeFileSync(cheminRes, JSON.stringify(res), "utf8");
+console.log(`   ${archives} pronostics archives, ${confrontes} confrontes aux scores`);
+console.log(`   historique : ${res.bilan.n} matchs juges, issue correcte ${res.bilan.n ? (100 * res.bilan.okIssue / res.bilan.n).toFixed(1) : "-"} %`
+  + (res.bilan.nMarche ? ` contre ${(100 * res.bilan.okMarche / res.bilan.nMarche).toFixed(1)} % pour le marche` : ""));
+console.log(`   ${Object.keys(pron.attente).length} pronostics en attente de resultat`);
+
 /* ─────────── 5. écriture ─────────── */
 if (!existsSync(DOSSIER)) mkdirSync(DOSSIER, { recursive: true });
 // classement des écarts les plus favorables, seuil atteint ou non
@@ -250,7 +337,9 @@ writeFileSync(join(DOSSIER, "forces.json"), JSON.stringify(forces), "utf8");
 writeFileSync(cheminHisto, JSON.stringify(histo, null, 1), "utf8");
 
 const ko = n => (n / 1024).toFixed(1) + " ko";
-console.log("6. Écriture terminée");
+console.log("7. Écriture terminée");
 console.log(`   jour.json        ${ko(JSON.stringify(jour).length)}`);
 console.log(`   forces.json      ${ko(JSON.stringify(forces).length)}`);
 console.log(`   historique.json  ${ko(JSON.stringify(histo).length)}`);
+console.log(`   resultats.json   ${ko(JSON.stringify(res).length)}`);
+console.log(`   pronostics.json  ${ko(JSON.stringify(pron).length)}`);

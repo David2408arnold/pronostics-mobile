@@ -12,7 +12,7 @@
 const CLE = "pronos-mobile.v1";
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8 };
 let E = { set: { ...DEFAUT }, journal: [] };
-let JOUR = null, HISTO = null;
+let JOUR = null, HISTO = null, SCORES = null;
 let vue = "matchs", filtreJour = "tous", recherche = "";
 let combine = [], tailleCombine = 4;
 let FORCES = null;
@@ -56,10 +56,12 @@ const norm = x => String(x || "").toLowerCase().normalize("NFD")
 async function recuperer(reseauDabord) {
   const opt = reseauDabord ? { cache: "reload" } : {};
   const lire = async f => { try { const r = await fetch("donnees/" + f, opt); return r.ok ? await r.json() : null; } catch { return null; } };
-  const [j, h, f] = await Promise.all([lire("jour.json"), lire("historique.json"), lire("forces.json")]);
+  const [j, h, f, r] = await Promise.all([
+    lire("jour.json"), lire("historique.json"), lire("forces.json"), lire("resultats.json")]);
   if (j) JOUR = j;
   if (h) HISTO = h;
   if (f) FORCES = f;
+  if (r) SCORES = r;
   majEntete(); rendre();
 }
 function majEntete() {
@@ -78,11 +80,12 @@ const ICONES = {
   matchs: '<path d="M3 6h18M3 12h18M3 18h12"/>',
   signaux: '<path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5h-5"/>',
   combines: '<path d="M4 7h10M4 12h13M4 17h7"/><circle cx="19" cy="7" r="2"/><circle cx="20" cy="17" r="2"/>',
+  scores: '<path d="M4 19V5m16 14V5"/><path d="M8 15l3-3 3 2 4-5"/><path d="M3 19h18"/>',
   journal: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/>',
   reglages: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>'
 };
 const ONGLETS = [["matchs", "Matchs"], ["signaux", "Écarts"], ["combines", "Combinés"],
-  ["journal", "Journal"], ["reglages", "Réglages"]];
+  ["scores", "Scores"], ["journal", "Journal"], ["reglages", "Réglages"]];
 function batirNav() {
   $("#nav").innerHTML = ONGLETS.map(([id, lab]) =>
     `<button data-v="${id}" class="${id === vue ? "on" : ""}">
@@ -199,6 +202,9 @@ function rendreMatchs() {
         ${nSig ? `<span class="tag t-pos" style="margin-left:auto">${nSig} signa${nSig > 1 ? "ux" : "l"}</span>` : ""}</div>
       <div class="eq"><span>${esc(m.h)}</span><span class="vs">contre</span><span>${esc(m.a)}</span></div>
       <div class="barre"><i class="b1" style="width:${100 * m.pH}%"></i><i class="bn" style="width:${100 * m.pD}%"></i><i class="b2" style="width:${100 * m.pA}%"></i></div>
+      ${m.score ? `<div style="font-size:11.5px;color:var(--tx3);margin:-2px 0 7px">
+        Score pronostiqué <b style="color:var(--tx2)">${esc(m.score)}</b>
+        · buts attendus ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</div>` : ""}
       <div class="cotes">${cell("1", m.pH, m.cH)}${cell("Nul", m.pD, m.cD)}${cell("2", m.pA, m.cA)}</div>
     </div>`;
   });
@@ -637,6 +643,72 @@ function listerAjout() {
   });
 }
 
+/* ─────────── scores : pronostic contre réalité ─────────── */
+/* Chaque pronostic est archivé AVANT le match, puis confronté au score réel le lendemain.
+   La comparaison avec le marché est affichée à côté : c'est elle qui donne l'échelle. */
+
+function rendreScores() {
+  if (!SCORES || !SCORES.matchs || !SCORES.matchs.length) {
+    $("#s-bilan").innerHTML = `<div class="vide">Aucun résultat encore confronté.<br>
+      <span style="font-size:12px">Les pronostics du jour seront comparés aux scores dès demain matin.</span></div>`;
+    $("#s-liste").innerHTML = "";
+    return;
+  }
+  const B = SCORES.bilan;
+  const tauxModele = B.n ? B.okIssue / B.n : 0;
+  const tauxMarche = B.nMarche ? B.okMarche / B.nMarche : null;
+  $("#s-bilan").innerHTML = `
+    <div class="bloc">
+      <h2 style="margin-top:0">Ce que vaut le pronostic</h2>
+      <div class="grid g2" style="margin-bottom:10px">
+        <div class="stat"><i>Issue correcte</i><b>${pc(tauxModele, 1)}</b></div>
+        <div class="stat"><i>Le marché, lui</i><b class="${tauxMarche > tauxModele ? "neg" : "pos"}">${tauxMarche == null ? "—" : pc(tauxMarche, 1)}</b></div>
+        <div class="stat"><i>Score exact</i><b>${pc(B.exact / B.n, 1)}</b></div>
+        <div class="stat"><i>Matchs jugés</i><b>${B.n}</b></div>
+      </div>
+      <div class="lg"><span>Erreur moyenne sur le nombre de buts</span><b>${B.erreurButs} but${B.erreurButs > 1 ? "s" : ""}</b></div>
+      <div class="lg"><span>Erreur moyenne sur l'écart au score</span><b>${B.erreurEcart} but${B.erreurEcart > 1 ? "s" : ""}</b></div>
+      <p style="font-size:12px;color:var(--tx2);margin:11px 0 0">
+        ${tauxMarche != null && tauxMarche > tauxModele
+          ? `Le marché désigne le bon vainqueur ${((tauxMarche - tauxModele) * 100).toFixed(1)} points plus souvent que le modèle. C'est la mesure, pas une opinion.`
+          : `Le modèle fait jeu égal avec le marché sur cet échantillon — encore trop court pour en conclure quoi que ce soit.`}
+        Un score exact tombe environ une fois sur ${Math.round(B.n / Math.max(1, B.exact))}.
+      </p>
+      ${SCORES.matchs.some(x => x.reconstruit) ? `<p style="font-size:11.5px;color:var(--tx3);margin:9px 0 0">
+        Les journées antérieures à l'installation sont marquées « reconstruit » : le modèle y a été
+        réajusté sur les seuls matchs antérieurs à chaque rencontre, mais ces pronostics n'ont pas
+        été publiés à l'avance.</p>` : ""}
+    </div>`;
+
+  const parJour = {};
+  for (const m of SCORES.matchs) (parJour[m.d] ||= []).push(m);
+  const jours = Object.keys(parJour).sort().reverse().slice(0, 10);
+  $("#s-liste").innerHTML = jours.map(j => {
+    const ms = parJour[j].filter(m => !E.set.champs.length || E.set.champs.includes(m.div));
+    if (!ms.length) return "";
+    const bons = ms.filter(m => m.okIssue).length;
+    return `<h2>${libJourPasse(j)} <span style="text-transform:none;letter-spacing:0;color:var(--tx3);font-weight:400">
+        · ${bons}/${ms.length} issues trouvées</span></h2>` +
+      ms.map(m => `<div class="sc ${m.exact ? "net" : m.okIssue ? "ok" : "ko"}">
+        <div class="sh"><span class="sn">${esc(m.h)} – ${esc(m.a)}</span>
+          <span class="sco">${esc(m.reel)}</span></div>
+        <div class="sd">
+          <span>prévu <b style="color:var(--tx2)">${esc(m.prevu)}</b></span>
+          <span>attendu ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</span>
+          <span class="tag ${m.exact ? "t-acc" : m.okIssue ? "t-pos" : "t-mut"}">
+            ${m.exact ? "score exact" : m.okIssue ? "issue trouvée" : "raté"}</span>
+          ${m.reconstruit ? '<span class="tag t-mut">reconstruit</span>' : ""}
+          ${!m.fiable ? '<span class="tag t-warn">peu de données</span>' : ""}
+        </div></div>`).join("");
+  }).join("") || `<div class="vide">Aucun match pour les championnats sélectionnés.</div>`;
+}
+function libJourPasse(d) {
+  if (d === aujourdhui()) return "Aujourd'hui";
+  if (d === new Date(Date.now() - 864e5).toISOString().slice(0, 10)) return "Hier";
+  const dt = new Date(d + "T12:00:00Z");
+  return JOURS[dt.getUTCDay()] + " " + dt.getUTCDate() + "/" + String(dt.getUTCMonth() + 1).padStart(2, "0");
+}
+
 /* ─────────── journal ─────────── */
 function bilanJournal() {
   const clos = E.journal.filter(p => p.res && p.res !== "attente");
@@ -844,6 +916,7 @@ function rendre() {
   if (vue === "matchs") { rendreFiltres(); rendreMatchs(); }
   else if (vue === "signaux") rendreSignaux();
   else if (vue === "combines") rendreCombines();
+  else if (vue === "scores") rendreScores();
   else if (vue === "journal") rendreJournal();
   else if (vue === "reglages") rendreReglages();
   const p = $("#pastille");
