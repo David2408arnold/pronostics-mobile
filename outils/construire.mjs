@@ -84,6 +84,7 @@ console.log(`   ${nbFichiers} fichiers, ${Object.values(resultats).flat().length
 const TOKEN = process.env.FOOTBALL_DATA_TOKEN;
 const API_DIV = { PL: "E0", ELC: "E1", FL1: "F1", BL1: "D1", SA: "I1", DED: "N1", PPL: "P1", PD: "SP1" };
 let ajoutsApi = 0, ignoresApi = 0;
+let recents = null;                 // rencontres renvoyees par l'API, portee module
 
 if (!TOKEN) {
   console.log("1 bis. FOOTBALL_DATA_TOKEN absent, on s'en tient aux CSV");
@@ -94,14 +95,24 @@ if (!TOKEN) {
   if (existsSync(cheminAssoc)) { try { assoc = JSON.parse(readFileSync(cheminAssoc, "utf8")); } catch { } }
 
   const dISO = n => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
-  let recents = null;
-  try {
-    const r = await fetch(`https://api.football-data.org/v4/matches?dateFrom=${dISO(9)}&dateTo=${dISO(0)}`,
-      { headers: { "X-Auth-Token": TOKEN }, signal: AbortSignal.timeout(30000) });
-    const j = await r.json();
-    if (j.errorCode) throw new Error(j.message);
-    recents = j.matches || [];
-  } catch (e) { console.log("   ! API indisponible : " + e.message + " — on continue sans"); }
+  const depuis = dISO(9);
+  /* On interroge compétition par compétition, et non l'endpoint global /matches :
+     mesuré le 12/09/2026, ce dernier accuse un jour de retard et omettait 27 matchs
+     du jour même, dont Chelsea 2-2 Hull City. Huit appels par exécution, pour une
+     limite de dix par minute. */
+  const anneeApi = new Date().getUTCFullYear() - (new Date().getUTCMonth() < 6 ? 1 : 0);
+  recents = [];
+  for (const code of Object.keys(API_DIV)) {
+    try {
+      const r = await fetch(`https://api.football-data.org/v4/competitions/${code}/matches?season=${anneeApi}`,
+        { headers: { "X-Auth-Token": TOKEN }, signal: AbortSignal.timeout(30000) });
+      const j = await r.json();
+      if (j.errorCode) throw new Error(j.message);
+      recents.push(...(j.matches || []).filter(m => m.utcDate.slice(0, 10) >= depuis));
+    } catch (e) { console.log(`   ! ${code} indisponible : ${e.message}`); }
+    await new Promise(t => setTimeout(t, 700));          // on reste sous la limite de débit
+  }
+  if (!recents.length) { recents = null; console.log("   ! aucune donnée API, on continue sans"); }
 
   if (recents) {
     for (const div of SUIVIS) {
@@ -128,6 +139,28 @@ if (!TOKEN) {
     console.log(`   ${ajoutsApi} résultats ajoutés que les CSV n'avaient pas encore`
       + (ignoresApi ? `, ${ignoresApi} ignorés faute d'association` : ""));
   }
+}
+
+/* Rencontres déjà jouées : on les marque pour que l'application ne les présente pas
+   comme à venir, avec des cotes sur lesquelles il est trop tard pour miser. */
+const joues = new Map();
+if (TOKEN) {
+  const assocJ = (() => {
+    const c = join(DOSSIER, "equipes-api.json");
+    try { return existsSync(c) ? JSON.parse(readFileSync(c, "utf8")) : {}; } catch { return {}; }
+  })();
+  for (const m of recents || []) {
+    const div = API_DIV[m.competition.code];
+    if (!div || m.status === "TIMED" || m.status === "SCHEDULED") continue;
+    const t = assocJ[div] || {};
+    const h = t[m.homeTeam.id], a = t[m.awayTeam.id];
+    if (!h || !a) continue;
+    joues.set(`${div}|${h}|${a}`, {
+      statut: m.status,
+      score: m.score.fullTime.home != null ? `${m.score.fullTime.home}-${m.score.fullTime.away}` : null
+    });
+  }
+  console.log(`   ${joues.size} rencontres deja jouees ou en cours reperees`);
 }
 
 console.log("2. Téléchargement des matchs à venir");
@@ -216,6 +249,7 @@ for (const f of fixtures) {
     cH: r2(f.maxH), cD: r2(f.maxD), cA: r2(f.maxA), cO: r2(f.maxO), cU: r2(f.maxU), nbBooks: f.nb1x2,
     cons, consOU, fiable: poidsMin >= MIN_MATCHS_FIABLE, poids: r2(poidsMin),
     parBook: f.parBook.map(c => c.map(x => r2(x))),
+    ...(joues.get(`${f.div}|${h}|${a}`) || {}),
     signaux, meilleur
   });
 }

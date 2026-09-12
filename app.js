@@ -10,7 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v15";        // à garder aligné avec VERSION dans sw.js
+const VERSION_APP = "v16";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null, SCORES = null;
@@ -110,7 +110,8 @@ function aller(v) {
 /* ─────────── sélection ─────────── */
 function matchsVisibles() {
   if (!JOUR) return [];
-  let ms = JOUR.matchs.filter(m => m.d >= aujourdhui());
+  // une rencontre terminee n'a plus rien a faire dans la liste des matchs a venir
+  let ms = JOUR.matchs.filter(m => m.d >= aujourdhui() && m.statut !== "FINISHED");
   if (E.set.champs.length) ms = ms.filter(m => E.set.champs.includes(m.div));
   const q = requete();
   if (q) {
@@ -202,6 +203,7 @@ function rendreMatchs() {
     html += `<div class="match" data-i="${JOUR.matchs.indexOf(m)}">
       <div class="mt"><b>${esc(m.nom)}</b><span>${esc(m.heure)}</span>
         ${!m.fiable ? '<span class="tag t-warn">peu de données</span>' : ""}
+        ${m.statut && m.statut !== "FINISHED" ? `<span class="tag t-neg">en cours${m.score ? " " + esc(m.score) : ""}</span>` : ""}
         ${nSig ? `<span class="tag t-pos" style="margin-left:auto">${nSig} signa${nSig > 1 ? "ux" : "l"}</span>` : ""}</div>
       <div class="eq"><span>${esc(m.h)}</span><span class="vs">contre</span><span>${esc(m.a)}</span></div>
       <div class="barre"><i class="b1" style="width:${100 * m.pH}%"></i><i class="bn" style="width:${100 * m.pD}%"></i><i class="b2" style="width:${100 * m.pA}%"></i></div>
