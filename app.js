@@ -10,10 +10,11 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "" };
+const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8 };
 let E = { set: { ...DEFAUT }, journal: [] };
 let JOUR = null, HISTO = null;
 let vue = "matchs", filtreJour = "tous", recherche = "";
+let combine = [], tailleCombine = 4;
 let FORCES = null;
 
 /* ─────────── stockage ─────────── */
@@ -76,10 +77,12 @@ function majEntete() {
 const ICONES = {
   matchs: '<path d="M3 6h18M3 12h18M3 18h12"/>',
   signaux: '<path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5h-5"/>',
+  combines: '<path d="M4 7h10M4 12h13M4 17h7"/><circle cx="19" cy="7" r="2"/><circle cx="20" cy="17" r="2"/>',
   journal: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/>',
   reglages: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>'
 };
-const ONGLETS = [["matchs", "Matchs"], ["signaux", "Écarts"], ["journal", "Journal"], ["reglages", "Réglages"]];
+const ONGLETS = [["matchs", "Matchs"], ["signaux", "Écarts"], ["combines", "Combinés"],
+  ["journal", "Journal"], ["reglages", "Réglages"]];
 function batirNav() {
   $("#nav").innerHTML = ONGLETS.map(([id, lab]) =>
     `<button data-v="${id}" class="${id === vue ? "on" : ""}">
@@ -464,6 +467,176 @@ function rendreSignaux() {
   }
 }
 
+/* ─────────── combinés ─────────── */
+/* Un combiné multiplie les cotes, mais il multiplie aussi la marge du bookmaker.
+   Avec une marge m par sélection, l'espérance d'un combiné de n sélections est
+   multipliée par (1 − m)ⁿ : c'est le seul chiffre qui compte vraiment, et
+   l'application l'affiche au lieu de le laisser dans l'ombre. */
+
+const TAILLES = [2, 3, 4, 5, 8, 10];
+
+/** Issue la plus probable d'un match selon le marché, avec son meilleur prix. */
+function favori(m) {
+  if (!m.cons) return null;
+  const opts = [["1", m.cons.H, m.cH], ["N", m.cons.D, m.cD], ["2", m.cons.A, m.cA]]
+    .filter(([, p, c]) => p && c);
+  if (!opts.length) return null;
+  const best = opts.reduce((a, b) => b[1] > a[1] ? b : a);
+  return { sel: best[0], p: best[1], cote: best[2] };
+}
+
+function proposerCombine() {
+  if (!JOUR) return;
+  const candidats = [];
+  for (const m of matchsVisibles()) {
+    if (!m.fiable) continue;
+    const f = favori(m);
+    if (f && f.p >= 0.4) candidats.push({ i: JOUR.matchs.indexOf(m), sel: f.sel, p: f.p, cote: f.cote });
+  }
+  candidats.sort((a, b) => b.p - a.p);
+  combine = candidats.slice(0, tailleCombine);
+  rendreCombines();
+}
+
+function calculCombine() {
+  if (!combine.length) return null;
+  let cote = 1, pMarche = 1, pModele = 1;
+  for (const l of combine) {
+    const m = JOUR.matchs[l.i];
+    cote *= l.cote;
+    pMarche *= l.p;
+    pModele *= (l.sel === "1" ? m.pH : l.sel === "N" ? m.pD : m.pA);
+  }
+  const mOp = Math.max(0, E.set.margeOp / 100);
+  const parSelection = 1 / (1 + mOp);          // ce qui reste après la marge, par sélection
+
+  /* Un combiné se place chez UN SEUL opérateur : additionner les meilleurs prix de
+     six bookmakers différents donnerait une cote que personne ne propose. On calcule
+     donc la cote totale bookmaker par bookmaker, et on retient le meilleur. */
+  let book = null;
+  if (JOUR.books) {
+    const IX = { "1": 0, "N": 1, "2": 2 };
+    JOUR.books.forEach((nom, b) => {
+      let produit = 1;
+      for (const l of combine) {
+        const pb = JOUR.matchs[l.i].parBook;
+        const prix = pb && pb[b] ? pb[b][IX[l.sel]] : null;
+        if (!prix) { produit = null; break; }
+        produit *= prix;
+      }
+      if (produit && (!book || produit > book.cote)) book = { nom, cote: produit };
+    });
+  }
+
+  return {
+    cote, pMarche, pModele, n: combine.length,
+    book,                                        // meilleur bookmaker unique, si connu
+    espBook: book ? pMarche * book.cote : null,
+    espOp: pMarche * cote * Math.pow(parSelection, combine.length),
+    uneFoisSur: 1 / pMarche
+  };
+}
+
+function rendreCombines() {
+  if (!JOUR) { $("#c-resume").innerHTML = '<div class="vide">Données non chargées.</div>'; return; }
+  $("#c-tailles").innerHTML = TAILLES.map(t =>
+    `<button class="puce ${t === tailleCombine ? "on" : ""}" data-t="${t}">${t} sélections</button>`).join("");
+  $("#c-tailles").querySelectorAll("button").forEach(b => b.onclick = () => {
+    tailleCombine = +b.dataset.t; proposerCombine();
+  });
+
+  const c = calculCombine();
+  if (!c) {
+    $("#c-resume").innerHTML = `<div class="note info">Choisis une taille puis « Proposer les favoris »,
+      ou ajoute tes propres sélections plus bas.</div>`;
+    $("#c-legs").innerHTML = "";
+  } else {
+    const perteOp = 1 - c.espOp;
+    const grave = c.espOp < 0.5;
+    $("#c-resume").innerHTML = `
+      <div class="bloc">
+        <div class="grid g2" style="margin-bottom:10px">
+          <div class="stat"><i>Cote totale</i><b>${(c.book ? c.book.cote : c.cote).toFixed(2)}</b></div>
+          <div class="stat"><i>Chances que ça passe</i><b>${pc(c.pMarche, 1)}</b></div>
+        </div>
+        <div class="lg"><span>À jouer en moyenne</span><b>${c.uneFoisSur.toFixed(0)} fois pour en gagner 1</b></div>
+        ${c.book ? `<div class="lg"><span>Meilleur bookmaker unique<br>
+          <span style="font-size:11.5px;color:var(--tx3)">${esc(c.book.nom)} · cote ${c.book.cote.toFixed(2)}</span></span>
+          <b class="${c.espBook >= 1 ? "pos" : "neg"}">${(100 * c.espBook).toFixed(0)} rendus pour 100 misés</b></div>` : ""}
+        <div class="lg"><span>Chez un opérateur à ${E.set.margeOp} %</span>
+          <b class="${c.espOp >= 1 ? "pos" : "neg"}">${(100 * c.espOp).toFixed(0)} rendus pour 100 misés</b></div>
+        <div class="note ${grave ? "bad" : ""}" style="margin:12px 0 0">
+          <b>La marge se multiplie à chaque sélection.</b> ${E.set.margeOp} % sur un pari simple
+          devient ${(100 * perteOp).toFixed(0)} % de perte attendue sur ce combiné de ${c.n}.
+          ${grave
+            ? "À ce niveau tu perds plus de la moitié de ta mise en espérance : c'est une loterie, plus un pari."
+            : "Un combiné n'améliore jamais l'espérance : il agrandit le lot et raréfie les gains."}
+        </div>
+        <p style="font-size:11.5px;color:var(--tx3);margin:8px 0 0">
+          Un combiné se place chez un seul opérateur : la cote affichée est celle du meilleur
+          bookmaker unique, pas un assemblage des meilleurs prix de plusieurs sites.</p>
+        <div class="grid g2" style="margin-top:12px">
+          <div class="stat"><i>Proba selon le modèle</i><b>${pc(c.pModele, 1)}</b></div>
+          <div class="stat"><i>Gain pour 1 000 ${E.set.cur}</i><b>${Math.round(1000 * (c.book ? c.book.cote : c.cote)).toLocaleString("fr-FR")}</b></div>
+        </div>
+        <button class="btn" style="margin-top:12px" id="c-journal">Enregistrer ce combiné</button>
+      </div>`;
+    $("#c-journal").onclick = () => formulairePari({
+      ev: `Combiné ${c.n} sélections`,
+      sel: combine.map(l => `${JOUR.matchs[l.i].h}-${JOUR.matchs[l.i].a} : ${l.sel}`).join(" / "),
+      cote: (c.book ? c.book.cote : c.cote).toFixed(2), m: "", p: c.pMarche,
+      d: combine.map(l => JOUR.matchs[l.i].d).sort().pop()
+    });
+
+    $("#c-legs").innerHTML = `<h2>Les ${c.n} sélections</h2>` + combine.map((l, k) => {
+      const m = JOUR.matchs[l.i];
+      const nom = l.sel === "1" ? m.h : l.sel === "2" ? m.a : "Match nul";
+      return `<div class="pari">
+        <div class="pt"><span class="pn">${esc(nom)}</span><b>${f2(l.cote)}</b></div>
+        <div class="pd">${esc(m.h)} – ${esc(m.a)} · ${esc(m.nom)} · ${libJour(m.d)} ${esc(m.heure)} · marché ${pc(l.p, 1)}</div>
+        <div class="pa"><button class="puce" data-rm="${k}" style="color:var(--neg)">Retirer</button></div>
+      </div>`;
+    }).join("");
+    $("#c-legs").querySelectorAll("[data-rm]").forEach(b => b.onclick = () => {
+      combine.splice(+b.dataset.rm, 1); rendreCombines();
+    });
+  }
+  listerAjout();
+}
+
+function listerAjout() {
+  const champ = $("#c-q"), boite = $("#c-res");
+  if (!champ || !JOUR) return;
+  const brut = norm(champ.value), q = ABREVIATIONS[brut] || brut;
+  if (q.length < 2) {
+    boite.innerHTML = '<p class="mut" style="font-size:12.5px;margin:0">Tape au moins deux lettres.</p>';
+    return;
+  }
+  const mots = q.split(" ").filter(Boolean);
+  const dedans = new Set(combine.map(l => l.i));
+  const trouves = JOUR.matchs
+    .map((m, i) => ({ m, i }))
+    .filter(({ m, i }) => m.d >= aujourdhui() && !dedans.has(i))
+    .filter(({ m }) => mots.every(w => norm(m.h + " " + m.a + " " + m.nom).includes(w)))
+    .slice(0, 6);
+  boite.innerHTML = trouves.length ? trouves.map(({ m, i }) => {
+    const opts = [["1", m.cons && m.cons.H, m.cH], ["N", m.cons && m.cons.D, m.cD], ["2", m.cons && m.cons.A, m.cA]]
+      .filter(([, p, c]) => p && c);
+    return `<div style="margin-bottom:11px">
+      <div style="font-size:13.5px;font-weight:600">${esc(m.h)} – ${esc(m.a)}</div>
+      <div style="font-size:11.5px;color:var(--tx3);margin-bottom:5px">${esc(m.nom)} · ${libJour(m.d)}</div>
+      <div class="pa">${opts.map(([sel, p, co]) =>
+        `<button class="puce" data-add="${i}|${sel}|${p}|${co}">${sel} · ${f2(co)}</button>`).join("")}</div></div>`;
+  }).join("") : '<p class="mut" style="font-size:12.5px;margin:0">Aucun match trouvé.</p>';
+  boite.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
+    const [i, sel, p, co] = b.dataset.add.split("|");
+    if (combine.length >= 12) return alert("Douze sélections, c'est déjà bien au-delà du raisonnable.");
+    combine.push({ i: +i, sel, p: +p, cote: +co });
+    champ.value = "";
+    rendreCombines();
+  });
+}
+
 /* ─────────── journal ─────────── */
 function bilanJournal() {
   const clos = E.journal.filter(p => p.res && p.res !== "attente");
@@ -645,7 +818,8 @@ function formulairePari(pre) {
 }
 
 /* ─────────── réglages ─────────── */
-const CHAMPS_R = [["r-bank", "bank"], ["r-cur", "cur"], ["r-kf", "kf"], ["r-max", "maxStake"], ["r-seuil", "seuil"], ["r-perte", "perteMax"]];
+const CHAMPS_R = [["r-bank", "bank"], ["r-cur", "cur"], ["r-kf", "kf"], ["r-max", "maxStake"],
+  ["r-seuil", "seuil"], ["r-perte", "perteMax"], ["r-margeop", "margeOp"]];
 function rendreReglages() {
   CHAMPS_R.forEach(([id, k]) => $("#" + id).value = E.set[k]);
   const dispo = JOUR ? Object.entries(JOUR.championnats) : [];
@@ -669,6 +843,7 @@ function rendreReglages() {
 function rendre() {
   if (vue === "matchs") { rendreFiltres(); rendreMatchs(); }
   else if (vue === "signaux") rendreSignaux();
+  else if (vue === "combines") rendreCombines();
   else if (vue === "journal") rendreJournal();
   else if (vue === "reglages") rendreReglages();
   const p = $("#pastille");
@@ -687,6 +862,11 @@ champQ.addEventListener("input", () => {
 });
 champQ.addEventListener("search", () => { if (!champQ.value) { recherche = ""; boutonQ.hidden = true; rendreFiltres(); rendreMatchs(); } });
 boutonQ.onclick = () => { champQ.value = ""; recherche = ""; boutonQ.hidden = true; champQ.blur(); rendreFiltres(); rendreMatchs(); };
+
+$("#c-proposer").onclick = proposerCombine;
+$("#c-vider").onclick = () => { combine = []; rendreCombines(); };
+let minuteurC = null;
+$("#c-q").addEventListener("input", () => { clearTimeout(minuteurC); minuteurC = setTimeout(listerAjout, 160); });
 
 $("#voile").onclick = fermer;
 $("#b-ajout").onclick = () => formulairePari(null);

@@ -8,7 +8,7 @@
    les quelques dizaines de millisecondes gagnées. Hors connexion, le cache prend le relais et
    tout reste utilisable.                                                                     */
 
-const VERSION = "v4";
+const VERSION = "v5";
 const COQUILLE = "coquille-" + VERSION;
 const DONNEES = "donnees-" + VERSION;
 

@@ -44,6 +44,27 @@
     <div id="liste-signaux"></div>
   </section>
 
+  <!-- ══════ COMBINÉS ══════ -->
+  <section id="v-combines">
+    <div class="bloc">
+      <h2 style="margin-top:0">Taille du combiné</h2>
+      <div class="filtres" id="c-tailles" style="padding:0;gap:6px;overflow:visible;flex-wrap:wrap"></div>
+      <div class="ligne" style="margin-top:12px">
+        <button class="btn gh pt" id="c-proposer">Proposer les favoris</button>
+        <button class="btn gh pt" id="c-vider">Vider</button>
+      </div>
+    </div>
+    <div id="c-resume"></div>
+    <div id="c-legs"></div>
+    <div class="bloc">
+      <h2 style="margin-top:0">Ajouter une sélection</h2>
+      <div class="recherche" style="padding:0">
+        <input id="c-q" type="search" inputmode="search" autocomplete="off" placeholder="Rechercher un match">
+      </div>
+      <div id="c-res" style="margin-top:8px"></div>
+    </div>
+  </section>
+
   <!-- ══════ JOURNAL ══════ -->
   <section id="v-journal">
     <div class="grid g3" id="j-stats"></div>
@@ -64,6 +85,7 @@
         <div><label>Mise max (% bankroll)</label><input type="number" id="r-max" inputmode="decimal" step="0.5"></div>
         <div><label>Marge minimale (%)</label><input type="number" id="r-seuil" inputmode="decimal" step="0.5"></div>
         <div><label>Perte mensuelle max</label><input type="number" id="r-perte" inputmode="numeric" step="1000"></div>
+        <div><label>Marge de ton opérateur (%)</label><input type="number" id="r-margeop" inputmode="decimal" step="0.5"></div>
       </div>
       <button class="btn" id="b-save" style="margin-top:12px">Enregistrer</button>
     </div>
