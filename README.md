@@ -87,6 +87,31 @@ Betfair Exchange dont les cotes sont brutes de commission.
 comportement correct face à un marché efficace. Le jour de la mise en service, sur 141 matchs
 exploitables, le meilleur écart disponible était de 1,6 % — sous le seuil.
 
+## Score exact : pourquoi 1-1, et comment faire mieux
+
+Sur 7 988 matchs réels, **1-1 est vraiment le score le plus fréquent (12,1 %)**, devant 1-0
+(9,3 %) et 2-1 (8,5 %). Chaque équipe marque le plus souvent exactement un but (33 % à domicile,
+36 % à l'extérieur) : « un but chacun » est la combinaison la plus fréquente. Le mode brut de la
+grille de scores est donc presque toujours 1-1, alors que l'issue la plus probable est souvent
+une victoire, qui additionne 1-0, 2-0, 2-1… Afficher ce 1-1 à côté d'un pronostic « victoire »
+se contredisait : l'application affiche donc le score le plus probable **dans l'issue
+pronostiquée**.
+
+`outils/tester-scores.mjs` compare les sources de buts attendus, en walk-forward sur 6 019 matchs :
+
+| buts attendus | log-loss du score | exact (mode brut) | exact (dans son issue) | exact (dans l'issue du modèle) |
+|---|---|---|---|---|
+| modèle + Dixon-Coles | 2,9206 | 12,5 % | 11,3 % | 11,3 % |
+| modèle sans DC | 2,9200 | 12,8 % | 11,6 % | 11,6 % |
+| **marché + DC** | **2,8878** | 13,1 % | **11,9 %** | 11,5 % |
+| marché sans DC | 2,8868 | 13,3 % | 11,8 % | 11,5 % |
+
+Les buts attendus **déduits des cotes du marché** (1X2 et plus/moins 2,5 buts, marge retirée)
+battent ceux du modèle de 0,033 en log-loss. Ils sont retenus (`lambdasMarche`) : onglet Matchs,
+score exact 11,3 % → 11,9 % ; onglet Scores, qui juge l'issue du modèle, 11,3 % → 11,5 %.
+La correction Dixon-Coles ne change presque rien. Afficher le mode brut trouverait plus de scores
+exacts (13,1 %), au prix de la contradiction décrite plus haut.
+
 ## Onglet Scores : le pronostic confronté au réel
 
 Chaque pronostic est archivé **avant** le match dans `donnees/pronostics.json` — le premier

@@ -10,7 +10,7 @@
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lireResultats, ajusterMixte, lambdas, grille, marches, sansMarge, CHAMPIONNATS } from "./modele.mjs";
+import { lireResultats, ajusterMixte, lambdas, lambdasMarche, grille, marches, sansMarge, CHAMPIONNATS } from "./modele.mjs";
 
 const RACINE = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DOSSIER = join(RACINE, "donnees");
@@ -85,6 +85,11 @@ for (const div of SUIVIS) {
         fiable: poidsMin >= MIN_MATCHS_FIABLE, poids: r2(poidsMin),
         pm: [r3(mk.H), r3(mk.D), r3(mk.A)],
         pq: cons ? [r3(cons[0]), r3(cons[1]), r3(cons[2])] : null,
+        ...(() => {
+          const ouv = m.oo && m.ou ? sansMarge([m.oo, m.ou]) : null;
+          const Lq = cons && ouv ? lambdasMarche([cons[0], cons[1], cons[2], ouv[0]], M.rho) : null;
+          return Lq ? { lHm: r2(Lq[0]), lAm: r2(Lq[1]) } : {};
+        })(),
         prevu, reel, lH: r2(L[0]), lA: r2(L[1]), butsReels: m.hg + m.ag,
         issuePrevue, issueReelle, issueMarche,
         pIssueReelle: r3(probas.find(x => x[0] === issueReelle)[1]),
@@ -107,7 +112,13 @@ const cles = new Set(res.matchs.map(x => `${x.d}|${x.h}|${x.a}`));
 let ajoutes = 0;
 for (const x of sortie) {
   const k = `${x.d}|${x.h}|${x.a}`;
-  if (cles.has(k)) continue;         // un vrai pronostic publié à l'avance prime toujours
+  if (cles.has(k)) {
+    // un vrai pronostic publié à l'avance prime toujours ; on ne lui ajoute que les buts
+    // attendus du marché s'il ne les avait pas, sans toucher au reste
+    const e = res.matchs.find(z => `${z.d}|${z.h}|${z.a}` === k);
+    if (e && e.lHm == null && x.lHm != null) { e.lHm = x.lHm; e.lAm = x.lAm; }
+    continue;
+  }
   cles.add(k); res.matchs.push(x); ajoutes++;
 }
 res.matchs.sort((x, y) => (y.d + y.h).localeCompare(x.d + x.h));

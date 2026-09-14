@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   lireResultats, lireFixtures, ajuster, ajusterMixte, lambdas, grille, marches,
-  sansMarge, marge, apparier, CHAMPIONNATS, NOMS_BOOKS
+  sansMarge, marge, apparier, CHAMPIONNATS, NOMS_BOOKS, lambdasMarche
 } from "./modele.mjs";
 
 const RACINE = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -274,6 +274,11 @@ for (const f of fixtures) {
     lH: r2(L[0]), lA: r2(L[1]), score: mk.scores[0] ? mk.scores[0][0] : null,
     cH: r2(f.maxH), cD: r2(f.maxD), cA: r2(f.maxA), cO: r2(f.maxO), cU: r2(f.maxU), nbBooks: f.nb1x2,
     cons, consOU, fiable: poidsMin >= MIN_MATCHS_FIABLE, poids: r2(poidsMin),
+    // buts attendus du marché : meilleurs que ceux du modèle pour le score exact
+    ...(() => {
+      const Lq = cons && consOU ? lambdasMarche([cons.H, cons.D, cons.A, consOU.O], M.rho) : null;
+      return Lq ? { lHm: r2(Lq[0]), lAm: r2(Lq[1]) } : {};
+    })(),
     parBook: f.parBook.map(c => c.map(x => r2(x))),
     ...(joues.get(`${f.div}|${h}|${a}`) || {}),
     signaux, meilleur
@@ -361,7 +366,7 @@ for (const m of matchs) {
   if (pron.attente[cle]) continue;
   pron.attente[cle] = {
     d: m.d, div: m.div, nom: m.nom, heure: m.heure, h: m.h, a: m.a,
-    score: m.score, lH: m.lH, lA: m.lA,
+    score: m.score, lH: m.lH, lA: m.lA, lHm: m.lHm, lAm: m.lAm,
     pH: m.pH, pD: m.pD, pA: m.pA,
     cons: m.cons, fiable: m.fiable, poids: m.poids, pose: new Date().toISOString().slice(0, 10)
   };
@@ -386,7 +391,7 @@ for (const [cle, p] of Object.entries(pron.attente)) {
     prevu: p.score, reel: `${vrai.hg}-${vrai.ag}`, poids: p.poids,
     pm: [r3(p.pH), r3(p.pD), r3(p.pA)],
     pq: p.cons ? [r3(p.cons.H), r3(p.cons.D), r3(p.cons.A)] : null,
-    lH: p.lH, lA: p.lA, butsReels: vrai.hg + vrai.ag,
+    lH: p.lH, lA: p.lA, lHm: p.lHm, lAm: p.lAm, butsReels: vrai.hg + vrai.ag,
     issuePrevue, issueReelle, issueMarche,
     pIssueReelle: r3(probas.find(x => x[0] === issueReelle)[1]),
     exact: p.score === `${vrai.hg}-${vrai.ag}`,

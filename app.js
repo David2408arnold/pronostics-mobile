@@ -10,7 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v21";        // à garder aligné avec VERSION dans sw.js
+const VERSION_APP = "v22";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false, source: "marche" };
 let E = { set: { ...DEFAUT }, journal: [], marges: [] };
 let JOUR = null, HISTO = null, SCORES = null;
@@ -217,10 +217,11 @@ function rendreMatchs() {
       <div class="barre"><i class="b1" style="width:${100 * m.pH}%"></i><i class="bn" style="width:${100 * m.pD}%"></i><i class="b2" style="width:${100 * m.pA}%"></i></div>
       ${(() => {
         const fav = favoriDe(marche ? [m.cons.H, m.cons.D, m.cons.A] : [m.pH, m.pD, m.pA]);
-        const sc = scoreDansIssue(m.lH, m.lA, rhoDe(m.div), fav);
+        const [bl, bm] = marche ? butsAttendus(m) : [m.lH, m.lA];
+        const sc = scoreDansIssue(bl, bm, rhoDe(m.div), fav);
         return sc ? `<div style="font-size:11.5px;color:var(--tx3);margin:-2px 0 7px">
           Pronostic <b style="color:var(--tx2)">${esc(nomIssue(m, fav))}</b>, score le plus probable
-          <b style="color:var(--tx2)">${sc}</b> · buts attendus ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</div>` : "";
+          <b style="color:var(--tx2)">${sc}</b> · buts attendus ${bl.toFixed(1)}–${bm.toFixed(1)}</div>` : "";
       })()}
       ${E.set.avecDC ? conseilDC(m) : ""}
       <div class="cotes">${cell("1", marche ? m.cons.H : m.pH, m.cH)}${cell("Nul", marche ? m.cons.D : m.pD, m.cD)}${cell("2", marche ? m.cons.A : m.pA, m.cA)}</div>
@@ -868,7 +869,7 @@ function rendreScores() {
         </div>
         <div class="sd" style="margin-top:2px">
           <span>score pronostiqué <b style="color:var(--tx2)">${esc(sa)}</b></span>
-          <span>buts attendus ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</span>
+          <span>buts attendus ${butsAttendus(m)[0].toFixed(1)}–${butsAttendus(m)[1].toFixed(1)}</span>
         </div></div>`; }).join("");
   }).join("") || `<div class="vide">Aucun match pour les championnats sélectionnés.</div>`;
 }
@@ -1029,8 +1030,10 @@ const rhoDe = div => {
   return c && isFinite(c.rho) ? c.rho : 0;             // inconnu : Poisson simple, sans correction
 };
 const favoriDe = p => ["1", "N", "2"][p.indexOf(Math.max(...p))];
+/** Buts attendus servant au score affiché : ceux du marché quand ils existent. */
+const butsAttendus = m => m.lHm != null && m.lAm != null ? [m.lHm, m.lAm] : [m.lH, m.lA];
 /** Score affiché pour une ligne d'historique : cohérent avec l'issue qui est jugée. */
-const scoreAffiche = x => scoreDansIssue(x.lH, x.lA, rhoDe(x.div), x.issuePrevue) || x.prevu;
+const scoreAffiche = x => { const [l, m] = butsAttendus(x); return scoreDansIssue(l, m, rhoDe(x.div), x.issuePrevue) || x.prevu; };
 
 /** Nom lisible d'une issue 1 / N / 2 pour une ligne d'historique. */
 function nomIssue(m, code) {

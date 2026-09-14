@@ -47,6 +47,9 @@ export function lireResultats(text) {
       d, div: (o.Div || "").trim(), h, a, hg, ag,
       // tirs et tirs cadres : matiere premiere d'un substitut de xG
       ht: num(o.HS), at: num(o.AS), htc: num(o.HST), atc: num(o.AST),
+      // cotes plus/moins 2,5 buts : nécessaires pour déduire les buts attendus du marché
+      oo: firstNum(o, ["AvgC>2.5", "Avg>2.5", "B365C>2.5", "B365>2.5"]),
+      ou: firstNum(o, ["AvgC<2.5", "Avg<2.5", "B365C<2.5", "B365<2.5"]),
       oh: firstNum(o, ["AvgCH", "B365CH", "AvgH", "B365H"]),
       od: firstNum(o, ["AvgCD", "B365CD", "AvgD", "B365D"]),
       oa: firstNum(o, ["AvgCA", "B365CA", "AvgA", "B365A"])
@@ -225,6 +228,41 @@ export function ajusterMixte(ms, opts = {}) {
   const M = ajuster(melange, { ...opts, estimerRho: false });
   if (!M) return surButs;
   return { ...M, rho: surButs.rho, conversion: taux };
+}
+
+/** Buts attendus implicites du marché : les λ dont la grille de scores reproduit le mieux
+    les probabilités 1, N, 2 et plus de 2,5 buts (marge retirée). Deux marchés sont
+    nécessaires : le plus/moins fixe le total de buts, le 1X2 fixe leur répartition.
+    Mesuré sur 6 019 matchs (outils/tester-scores.mjs) : log-loss du score exact 2,8878
+    contre 2,9206 pour les λ du modèle, score exact trouvé 11,9 % contre 11,3 %.
+    cible = [pH, pD, pA, pPlus25]. */
+export function lambdasMarche(cible, rho = 0) {
+  if (!cible || cible.some(x => !(x > 0 && x < 1))) return null;
+  const resume = (l, m) => {
+    let H = 0, D = 0, A = 0, O = 0, t = 0;
+    for (let x = 0; x <= 7; x++) for (let y = 0; y <= 7; y++) {
+      let c = 1;
+      if (x === 0 && y === 0) c = 1 - l * m * rho; else if (x === 0 && y === 1) c = 1 + l * rho;
+      else if (x === 1 && y === 0) c = 1 + m * rho; else if (x === 1 && y === 1) c = 1 - rho;
+      const v = Math.max(0, c) * pois(x, l) * pois(y, m);
+      t += v; if (x > y) H += v; else if (x === y) D += v; else A += v;
+      if (x + y > 2.5) O += v;
+    }
+    return [H / t, D / t, A / t, O / t];
+  };
+  const err = (l, m) => { const r = resume(l, m); let e = 0; for (let k = 0; k < 4; k++) e += (r[k] - cible[k]) ** 2; return e; };
+  let bl = 1.4, bm = 1.1, be = Infinity;
+  for (let l = 0.2; l <= 3.8; l += 0.1) for (let m = 0.2; m <= 3.4; m += 0.1) {
+    const e = err(l, m); if (e < be) { be = e; bl = l; bm = m; }
+  }
+  for (const pas of [0.02, 0.005]) {
+    const l0 = bl, m0 = bm;
+    for (let l = l0 - 6 * pas; l <= l0 + 6 * pas; l += pas) for (let m = m0 - 6 * pas; m <= m0 + 6 * pas; m += pas) {
+      if (l <= 0.05 || m <= 0.05) continue;
+      const e = err(l, m); if (e < be) { be = e; bl = l; bm = m; }
+    }
+  }
+  return [bl, bm];
 }
 
 export function lambdas(M, home, away) {
