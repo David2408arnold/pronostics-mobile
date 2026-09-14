@@ -10,7 +10,7 @@
        marché dégrade la prédiction. Elle ne déclenche donc jamais un signal.              */
 
 const CLE = "pronos-mobile.v1";
-const VERSION_APP = "v20";        // à garder aligné avec VERSION dans sw.js
+const VERSION_APP = "v21";        // à garder aligné avec VERSION dans sw.js
 const DEFAUT = { bank: 100000, cur: "FCFA", kf: 0.25, maxStake: 2, seuil: 2, perteMax: 50000, champs: [], operateur: "", margeOp: 8, avecDC: false, source: "marche" };
 let E = { set: { ...DEFAUT }, journal: [], marges: [] };
 let JOUR = null, HISTO = null, SCORES = null;
@@ -211,13 +211,17 @@ function rendreMatchs() {
     html += `<div class="match" data-i="${JOUR.matchs.indexOf(m)}">
       <div class="mt"><b>${esc(m.nom)}</b><span>${esc(m.heure)}</span>
         ${!m.fiable ? '<span class="tag t-warn">peu de données</span>' : ""}
-        ${m.statut && m.statut !== "FINISHED" ? `<span class="tag t-neg">en cours${m.score ? " " + esc(m.score) : ""}</span>` : ""}
+        ${m.statut && m.statut !== "FINISHED" ? `<span class="tag t-neg">en cours${m.scoreReel ? " " + esc(m.scoreReel) : ""}</span>` : ""}
         ${nSig ? `<span class="tag t-pos" style="margin-left:auto">${nSig} signa${nSig > 1 ? "ux" : "l"}</span>` : ""}</div>
       <div class="eq"><span>${esc(m.h)}</span><span class="vs">contre</span><span>${esc(m.a)}</span></div>
       <div class="barre"><i class="b1" style="width:${100 * m.pH}%"></i><i class="bn" style="width:${100 * m.pD}%"></i><i class="b2" style="width:${100 * m.pA}%"></i></div>
-      ${m.score ? `<div style="font-size:11.5px;color:var(--tx3);margin:-2px 0 7px">
-        Score pronostiqué <b style="color:var(--tx2)">${esc(m.score)}</b>
-        · buts attendus ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</div>` : ""}
+      ${(() => {
+        const fav = favoriDe(marche ? [m.cons.H, m.cons.D, m.cons.A] : [m.pH, m.pD, m.pA]);
+        const sc = scoreDansIssue(m.lH, m.lA, rhoDe(m.div), fav);
+        return sc ? `<div style="font-size:11.5px;color:var(--tx3);margin:-2px 0 7px">
+          Pronostic <b style="color:var(--tx2)">${esc(nomIssue(m, fav))}</b>, score le plus probable
+          <b style="color:var(--tx2)">${sc}</b> · buts attendus ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</div>` : "";
+      })()}
       ${E.set.avecDC ? conseilDC(m) : ""}
       <div class="cotes">${cell("1", marche ? m.cons.H : m.pH, m.cH)}${cell("Nul", marche ? m.cons.D : m.pD, m.cD)}${cell("2", marche ? m.cons.A : m.pA, m.cA)}</div>
     </div>`;
@@ -436,7 +440,7 @@ function ouvrirMatch(i) {
     <h2 style="margin-top:0">Pronostic du modèle</h2>
     <div class="grid g3" style="margin-bottom:6px">
       <div class="stat"><i>Buts attendus</i><b style="font-size:15px">${f2(m.lH)} – ${f2(m.lA)}</b></div>
-      <div class="stat"><i>Score probable</i><b style="font-size:15px">${m.score || "—"}</b></div>
+      <div class="stat"><i>Score probable</i><b style="font-size:15px">${scoreDansIssue(m.lH, m.lA, rhoDe(m.div), favoriDe([m.pH, m.pD, m.pA])) || "—"}</b></div>
       <div class="stat"><i>Deux marquent</i><b style="font-size:15px">${pc(m.pBtts)}</b></div>
     </div>
     <h2>Prix et estimations</h2>
@@ -779,14 +783,14 @@ function bilanScores(ms) {
   return {
     n,
     okIssue: ms.filter(x => x.okIssue).length,
-    exact: ms.filter(x => x.exact).length,
+    exact: ms.filter(x => scoreAffiche(x) === x.reel).length,
     okMarche: avecMarche.filter(x => x.okMarche).length,
     nMarche: avecMarche.length,
     dcModele: dc(avecProbas, "pm"),
     dcMarche: dc(avecProbas, "pq"),
     erreurButs: ms.reduce((t, x) => t + Math.abs((x.lH + x.lA) - x.butsReels), 0) / n,
     erreurEcart: ms.reduce((t, x) => {
-      const [ph, pa] = x.prevu.split("-").map(Number), [rh, ra] = x.reel.split("-").map(Number);
+      const [ph, pa] = scoreAffiche(x).split("-").map(Number), [rh, ra] = x.reel.split("-").map(Number);
       return t + Math.abs((ph - pa) - (rh - ra));
     }, 0) / n
   };
@@ -834,14 +838,9 @@ function rendreScores() {
       <p style="font-size:12px;color:var(--tx2);margin:11px 0 0">
         Un score exact tombe environ une fois sur ${Math.round(B.n / Math.max(1, B.exact))}.
       </p>
-      <div class="note info" style="margin-top:11px">
-        <b>Le score le plus probable et l'issue pronostiquée diffèrent souvent</b> — dans deux
-        tiers des matchs. 1-1 est fréquemment le score isolé le plus probable (environ 11 %),
-        alors que la victoire à domicile reste l'issue la plus probable une fois additionnés
-        tous les scores qui la composent : 1-0, 2-0, 2-1, 3-1… Les cartes ci-dessous affichent
-        donc l'issue pronostiquée en premier, puisque c'est elle qui est jugée, et le score le
-        plus probable en dessous à titre indicatif.
-      </div>
+      <p style="font-size:11.5px;color:var(--tx3);margin:9px 0 0">
+        Le score affiché est le plus probable parmi ceux qui donnent l'issue pronostiquée :
+        un pronostic « victoire à domicile » affiche donc 1-0 ou 2-1, jamais 1-1.</p>
       ${SCORES.matchs.some(x => x.reconstruit) ? `<p style="font-size:11.5px;color:var(--tx3);margin:9px 0 0">
         Les journées antérieures à l'installation sont marquées « reconstruit » : le modèle y a été
         réajusté sur les seuls matchs antérieurs à chaque rencontre, mais ces pronostics n'ont pas
@@ -857,21 +856,20 @@ function rendreScores() {
     const bons = ms.filter(m => m.okIssue).length;
     return `<h2>${libJourPasse(j)} <span style="text-transform:none;letter-spacing:0;color:var(--tx3);font-weight:400">
         · ${bons}/${ms.length} issues trouvées</span></h2>` +
-      ms.map(m => `<div class="sc ${m.exact ? "net" : m.okIssue ? "ok" : "ko"}">
+      ms.map(m => { const sa = scoreAffiche(m), ex = sa === m.reel; return `<div class="sc ${ex ? "net" : m.okIssue ? "ok" : "ko"}">
         <div class="sh"><span class="sn">${esc(m.h)} – ${esc(m.a)}</span>
           <span class="sco">${esc(m.reel)}</span></div>
         <div class="sd">
           <span>pronostic <b style="color:var(--tx2)">${esc(nomIssue(m, m.issuePrevue))}</b></span>
           <span class="tag ${m.okIssue ? "t-pos" : "t-mut"}">${m.okIssue ? "issue trouvée" : "raté"}</span>
-          ${m.exact ? '<span class="tag t-acc">score exact</span>' : ""}
+          ${ex ? '<span class="tag t-acc">score exact</span>' : ""}
           ${m.reconstruit ? '<span class="tag t-mut">reconstruit</span>' : ""}
           ${!m.fiable ? '<span class="tag t-warn">peu de données</span>' : ""}
         </div>
         <div class="sd" style="margin-top:2px">
-          <span>score le plus probable ${esc(m.prevu)}${issueDuScore(m.prevu) !== m.issuePrevue
-            ? ' <span title="un score de 1-1 peut être le plus probable alors que la victoire à domicile reste l\'issue la plus probable">·</span>' : ""}</span>
+          <span>score pronostiqué <b style="color:var(--tx2)">${esc(sa)}</b></span>
           <span>buts attendus ${m.lH.toFixed(1)}–${m.lA.toFixed(1)}</span>
-        </div></div>`).join("");
+        </div></div>`; }).join("");
   }).join("") || `<div class="vide">Aucun match pour les championnats sélectionnés.</div>`;
 }
 /** Modèle et marché désignent le même favori la plupart du temps. Comparer leurs
@@ -1004,6 +1002,36 @@ function ageCotes(quand) {
   return `il y a ${j} jour${j > 1 ? "s" : ""}`;
 }
 
+/* Le score isolé le plus probable est presque toujours 1-1 (environ 11 %) : sur 400 matchs
+   archivés, 286 affichaient 1-1 alors que l'issue pronostiquée n'était un nul qu'une fois.
+   Afficher ce score à côté du pronostic donnait une contradiction permanente. On affiche
+   désormais le score le plus probable PARMI ceux qui réalisent l'issue pronostiquée :
+   il ne peut plus la contredire. */
+function scoreDansIssue(lH, lA, rho, issue) {
+  if (!isFinite(lH) || !isFinite(lA) || !issue) return null;
+  const F = [1]; for (let i = 1; i <= 10; i++) F[i] = F[i - 1] * i;
+  const po = (k, l) => Math.exp(-l) * Math.pow(l, k) / F[k];
+  let meilleur = null, pMax = -1;
+  for (let x = 0; x <= 8; x++) for (let y = 0; y <= 8; y++) {
+    if (issue === "1" ? !(x > y) : issue === "N" ? x !== y : !(x < y)) continue;
+    let t = 1;                                          // correction Dixon-Coles des petits scores
+    if (x === 0 && y === 0) t = 1 - lH * lA * rho;
+    else if (x === 0 && y === 1) t = 1 + lH * rho;
+    else if (x === 1 && y === 0) t = 1 + lA * rho;
+    else if (x === 1 && y === 1) t = 1 - rho;
+    const p = Math.max(0, t) * po(x, lH) * po(y, lA);
+    if (p > pMax) { pMax = p; meilleur = `${x}-${y}`; }
+  }
+  return meilleur;
+}
+const rhoDe = div => {
+  const c = JOUR && JOUR.championnats && JOUR.championnats[div];
+  return c && isFinite(c.rho) ? c.rho : 0;             // inconnu : Poisson simple, sans correction
+};
+const favoriDe = p => ["1", "N", "2"][p.indexOf(Math.max(...p))];
+/** Score affiché pour une ligne d'historique : cohérent avec l'issue qui est jugée. */
+const scoreAffiche = x => scoreDansIssue(x.lH, x.lA, rhoDe(x.div), x.issuePrevue) || x.prevu;
+
 /** Nom lisible d'une issue 1 / N / 2 pour une ligne d'historique. */
 function nomIssue(m, code) {
   return code === "1" ? m.h : code === "2" ? m.a : "Match nul";
@@ -1061,8 +1089,8 @@ function indexResultats() {
   };
   for (const m of (SCORES && SCORES.matchs) || []) poser(m.d, m.h, m.a, m.reel, m.pq);
   for (const m of (JOUR && JOUR.matchs) || [])
-    if (m.statut === "FINISHED" && m.score)
-      poser(m.d, m.h, m.a, m.score, m.cons ? [m.cons.H, m.cons.D, m.cons.A] : null);
+    if (m.statut === "FINISHED" && m.scoreReel)
+      poser(m.d, m.h, m.a, m.scoreReel, m.cons ? [m.cons.H, m.cons.D, m.cons.A] : null);
   return ix;
 }
 /** Cherche un résultat en tolérant un jour d'écart : les sources ne datent pas

@@ -177,7 +177,8 @@ if (TOKEN) {
     if (!h || !a) continue;
     joues.set(`${div}|${h}|${a}`, {
       statut: m.status,
-      score: m.score.fullTime.home != null ? `${m.score.fullTime.home}-${m.score.fullTime.away}` : null
+      // champ distinct : « score » est déjà le score pronostiqué
+      scoreReel: m.score.fullTime.home != null ? `${m.score.fullTime.home}-${m.score.fullTime.away}` : null
     });
   }
   console.log(`   ${joues.size} rencontres deja jouees ou en cours reperees`);
