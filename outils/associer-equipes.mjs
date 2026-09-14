@@ -41,9 +41,14 @@ async function api(chemin) {
   const r = await fetch("https://api.football-data.org/v4" + chemin, {
     headers: { "X-Auth-Token": TOKEN }, signal: AbortSignal.timeout(30000)
   });
-  if (r.status === 429) { await new Promise(t => setTimeout(t, 61000)); return api(chemin); }
   const j = await r.json();
+  if (r.status === 429 || (j.errorCode && /limit/i.test(String(j.message || "")))) {
+    const attente = +((String(j.message || "").match(/(\d+)\s*second/) || [])[1] || 60);
+    await new Promise(t => setTimeout(t, (attente + 2) * 1000));
+    return api(chemin);
+  }
   if (j.errorCode) throw new Error(j.message);
+  await new Promise(t => setTimeout(t, 6500));       // 10 appels par minute au maximum
   return j;
 }
 

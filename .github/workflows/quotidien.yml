@@ -4,7 +4,10 @@ on:
   schedule:
     # Toutes les 3 heures : football-data n est pas temps reel, mais des qu il publie
     # un score la prochaine execution le reprend, au lieu d attendre le lendemain.
-    - cron: "40 */3 * * *"
+    - cron: "40 2,8,11,14,17,20,23 * * *"
+    # Une fois par jour, on refait aussi l'association des équipes : elle change rarement,
+    # et la lancer à chaque exécution consommait la moitié du quota d'appels à l'API.
+    - cron: "40 5 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -19,13 +22,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
 
       - name: Associer les equipes de l API
+        if: github.event.schedule == '40 5 * * *' || github.event_name == 'workflow_dispatch'
         run: node outils/associer-equipes.mjs
         env:
           FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
@@ -41,8 +45,11 @@ jobs:
           node -e "
             const j = require('./donnees/jour.json');
             if (!j.matchs || !j.matchs.length) { console.error('jour.json ne contient aucun match'); process.exit(1); }
-            const age = (Date.now() - new Date(j.genere)) / 60000;
-            if (age > 30) { console.error('jour.json semble perime'); process.exit(1); }
+            // jour.json n'est réécrit que si son contenu change : un horodatage ancien est
+            // donc normal. On vérifie plutôt que les résultats ont bien été mis à jour.
+            const r = require('./donnees/resultats.json');
+            const age = (Date.now() - new Date(r.maj)) / 60000;
+            if (age > 30) { console.error('resultats.json n a pas ete mis a jour'); process.exit(1); }
             console.log(j.matchs.length + ' matchs, ' + Object.keys(j.championnats).length + ' championnats');
           "
 

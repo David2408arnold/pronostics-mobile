@@ -102,15 +102,35 @@ if (!TOKEN) {
      limite de dix par minute. */
   const anneeApi = new Date().getUTCFullYear() - (new Date().getUTCMonth() < 6 ? 1 : 0);
   recents = [];
+  /* Limite du palier gratuit : 10 appels par minute, partagés avec associer-equipes.mjs.
+     Espacer de 700 ms ne suffisait pas : 5 championnats sur 8 étaient refusés à chaque
+     exécution et leurs scores n'arrivaient jamais. On espace donc de 6,5 s, et si l'API
+     impose malgré tout une pause (« Wait N seconds »), on attend puis on réessaie. */
+  const pause = ms => new Promise(t => setTimeout(t, ms));
   for (const code of Object.keys(API_DIV)) {
-    try {
-      const r = await fetch(`https://api.football-data.org/v4/competitions/${code}/matches?season=${anneeApi}`,
-        { headers: { "X-Auth-Token": TOKEN }, signal: AbortSignal.timeout(30000) });
-      const j = await r.json();
-      if (j.errorCode) throw new Error(j.message);
-      recents.push(...(j.matches || []).filter(m => m.utcDate.slice(0, 10) >= depuis));
-    } catch (e) { console.log(`   ! ${code} indisponible : ${e.message}`); }
-    await new Promise(t => setTimeout(t, 700));          // on reste sous la limite de débit
+    let fait = false;
+    for (let essai = 1; essai <= 3 && !fait; essai++) {
+      try {
+        const r = await fetch(`https://api.football-data.org/v4/competitions/${code}/matches?season=${anneeApi}`,
+          { headers: { "X-Auth-Token": TOKEN }, signal: AbortSignal.timeout(30000) });
+        const j = await r.json();
+        if (j.errorCode || r.status === 429) {
+          const attente = +((String(j.message || "").match(/(\d+)\s*second/) || [])[1] || 60);
+          if (essai < 3 && /limit/i.test(String(j.message || "")) ) {
+            console.log(`   … ${code} : limite de débit, pause de ${attente + 2} s`);
+            await pause((attente + 2) * 1000);
+            continue;
+          }
+          throw new Error(j.message || "HTTP " + r.status);
+        }
+        recents.push(...(j.matches || []).filter(m => m.utcDate.slice(0, 10) >= depuis));
+        fait = true;
+      } catch (e) {
+        if (essai === 3) console.log(`   ! ${code} indisponible : ${e.message}`);
+        else await pause(5000);
+      }
+    }
+    await pause(6500);
   }
   if (!recents.length) { recents = null; console.log("   ! aucune donnée API, on continue sans"); }
 
