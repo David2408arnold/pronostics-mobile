@@ -1,13 +1,28 @@
 {
- "signaux": [],
+ "signaux": [
+  {
+   "id": "2026-10-31|Betis|Malaga|1",
+   "d": "2026-10-31",
+   "div": "SP1",
+   "match": "Betis - Malaga",
+   "sel": "1",
+   "p": 0.734,
+   "pModele": 0.698,
+   "cote": 1.4,
+   "marge": 0.028,
+   "margeModele": -0.022,
+   "res": null,
+   "gain": null
+  }
+ ],
  "bilan": {
-  "proposes": 0,
+  "proposes": 1,
   "regles": 0,
   "gagnes": 0,
   "mises": 0,
   "gain": 0,
   "rendement": null,
   "ic95": null,
-  "depuis": null
+  "depuis": "2026-10-31"
  }
 }
