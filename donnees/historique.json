@@ -11,17 +11,18 @@
    "cote": 1.4,
    "marge": 0.028,
    "margeModele": -0.022,
-   "res": null,
-   "gain": null
+   "res": "gagne",
+   "gain": 0.4,
+   "score": "2-1"
   }
  ],
  "bilan": {
   "proposes": 1,
-  "regles": 0,
-  "gagnes": 0,
-  "mises": 0,
-  "gain": 0,
-  "rendement": null,
+  "regles": 1,
+  "gagnes": 1,
+  "mises": 1,
+  "gain": 0.4,
+  "rendement": 0.4,
   "ic95": null,
   "depuis": "2026-10-31"
  }
